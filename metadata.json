@@ -1,0 +1,6 @@
+{
+  "name": "RGUKT Digital No-Dues & Clearance Portal",
+  "description": "Role-based digital clearance and no-dues management portal for RGUKT RK Valley students, department administrators, and HOD/Dean sign-off with SBI Collect receipt verification.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
