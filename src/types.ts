@@ -1,8 +1,8 @@
-export type DepartmentId = 'library' | 'hostel' | 'lab' | 'finance' | 'sports';
+export type DepartmentId = 'library' | 'hostel' | 'lab' | 'finance' | 'sports' | 'itinfra';
 
 export type Role = 'student' | 'dept_admin' | 'hod' | 'dean' | 'director' | 'verification_officer';
 
-export type StudentBranchCode = 'CSE' | 'AIML' | 'ECE' | 'EEE' | 'CE' | 'ME' | 'CHEMICAL' | 'MME';
+export type StudentBranchCode = 'CSE' | 'AIML' | 'ECE' | 'EEE' | 'CE' | 'ME' | 'CHEMICAL' | 'MME' | 'PUC';
 
 export type ClearanceStatus = 'pending' | 'under_review' | 'approved' | 'rejected';
 

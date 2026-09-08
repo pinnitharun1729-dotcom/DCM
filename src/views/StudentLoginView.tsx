@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { ArrowLeft, KeyRound, ShieldCheck, User, Eye, EyeOff, AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
-import { GoogleSignInModal } from '../components/GoogleSignInModal';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { StudentProfile } from '../types';
 import { authenticateStudent, getStudents } from '../utils/storage';
+import { loginWithGoogle } from '../utils/authService';
 
 interface StudentLoginViewProps {
   onBackToLanding: () => void;
@@ -14,8 +14,6 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
   onBackToLanding,
   onSuccess,
 }) => {
-  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
-  
   // Email + Password state
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +25,26 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
   const [pendingStudent, setPendingStudent] = useState<StudentProfile | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
-  const handlePasswordLogin = (e: React.FormEvent) => {
+  const handleGoogleSignIn = async () => {
+    setLoginError(null);
+    setIsSubmitting(true);
+    const { session, error } = await loginWithGoogle();
+    setIsSubmitting(false);
+
+    if (error) {
+      if (error === 'cancelled') {
+        setLoginError(null);
+      } else {
+        setLoginError(error);
+      }
+    } else if (session && session.role === 'student' && session.student) {
+      onSuccess(session.student);
+    } else {
+      setLoginError('Invalid role detected. Are you a faculty member?');
+    }
+  };
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
@@ -42,23 +59,21 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      const result = authenticateStudent(identifier, password);
+    const result = await authenticateStudent(identifier, password);
+    setIsSubmitting(false);
 
-      if (!result.success || !result.student) {
-        setLoginError(result.error || 'Authentication failed. Please check your credentials.');
-        return;
-      }
+    if (!result.success || !result.student) {
+      setLoginError(result.error || 'Authentication failed. Please check your credentials.');
+      return;
+    }
 
-      // Check if student is on default roll-number password
-      if (result.requiresPasswordChange || !result.student.hasChangedPassword) {
-        setPendingStudent(result.student);
-        setIsChangePasswordOpen(true);
-      } else {
-        onSuccess(result.student);
-      }
-    }, 400);
+    // Check if student is on default roll-number password
+    if (result.requiresPasswordChange || !result.student.hasChangedPassword) {
+      setPendingStudent(result.student);
+      setIsChangePasswordOpen(true);
+    } else {
+      onSuccess(result.student);
+    }
   };
 
   const handleQuickFill = (roll: string) => {
@@ -97,8 +112,9 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
         <div className="space-y-2">
           <button
             id="btn-student-google-signin"
-            onClick={() => setIsGoogleModalOpen(true)}
-            className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-sm rounded-2xl border-2 border-slate-300 hover:border-blue-400 shadow-xs transition-all flex items-center justify-center space-x-3 cursor-pointer group"
+            onClick={handleGoogleSignIn}
+            disabled={isSubmitting}
+            className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-sm rounded-2xl border-2 border-slate-300 hover:border-blue-400 shadow-xs transition-all flex items-center justify-center space-x-3 cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
               <path
@@ -244,17 +260,6 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
           <span>Passwords securely hashed. Prompted to update on first login.</span>
         </div>
       </div>
-
-      {/* Google Sign-in Verification Modal */}
-      <GoogleSignInModal
-        isOpen={isGoogleModalOpen}
-        onClose={() => setIsGoogleModalOpen(false)}
-        onSuccess={(student) => {
-          setIsGoogleModalOpen(false);
-          // If student logged in with Google, they can proceed directly
-          onSuccess(student);
-        }}
-      />
 
       {/* First-time Change Password Modal */}
       {pendingStudent && (

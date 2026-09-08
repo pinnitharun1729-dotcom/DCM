@@ -66,10 +66,10 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({ session })
 
   if (!activeToast) return null;
 
-  const handleDismiss = () => {
+  const handleDismiss = async () => {
     if (activeToast) {
       setDismissedIds((prev) => new Set(prev).add(activeToast.id));
-      markNotificationRead(activeToast.id);
+      await markNotificationRead(activeToast.id);
     }
     setActiveToast(null);
   };

@@ -17,13 +17,13 @@ export const StudentProfileHeader: React.FC<StudentProfileHeaderProps> = ({
   onOpenMailbox,
   unreadEmailCount = 0,
 }) => {
-  const departments = ['library', 'hostel', 'lab', 'finance', 'sports'] as const;
+  const departments = ['library', 'hostel', 'lab', 'finance', 'sports', 'itinfra'] as const;
   const approvedCount = departments.filter(
     (d) => clearanceRecord.departments[d]?.status === 'approved'
   ).length;
-  const isAllDeptApproved = approvedCount === 5;
+  const isAllDeptApproved = approvedCount === 6;
   const isFinalApproved = clearanceRecord.certificate_generated;
-  const percentComplete = Math.round((approvedCount / 5) * 100);
+  const percentComplete = Math.round((approvedCount / 6) * 100);
 
   return (
     <div className="bento-card p-4 sm:p-6 mb-6 relative overflow-hidden">
@@ -116,7 +116,7 @@ export const StudentProfileHeader: React.FC<StudentProfileHeaderProps> = ({
                 Clearance Progress
               </span>
               <span className="text-sm font-bold text-slate-900 font-mono">
-                {approvedCount}/5 Depts
+                {approvedCount}/6 Depts
               </span>
             </div>
 

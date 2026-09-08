@@ -22,6 +22,7 @@ import {
   CreditCard,
   FlaskConical,
   Trophy,
+  Laptop,
   KeyRound,
   X,
   Upload,
@@ -35,18 +36,12 @@ import {
   StudentBranchCode,
 } from '../types';
 import {
-  getClearanceRecords,
-  getClearanceRecordsForAccount,
-  getStudents,
-  getStudentsForAccount,
-  getDues,
-  getDuesForAccount,
-  getStudentBranchCode,
   hodApproveClearance,
   hodRejectClearance,
   resetStudentPassword,
   syncStudentRecords,
 } from '../utils/storage';
+import { useFirebaseDataForAccount, getStudentBranchCode } from '../hooks/useFirebaseData';
 import { RejectReasonModal } from '../components/RejectReasonModal';
 import { CertificatePreviewModal } from '../components/CertificatePreviewModal';
 import { generateNoDuesPDF } from '../utils/certificate';
@@ -72,11 +67,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'queue' | 'records' | 'reports'>(initialTab);
   const [directorBranchFilter, setDirectorBranchFilter] = useState<string>('all');
 
-  const [students, setStudents] = useState<StudentProfile[]>(() => getStudentsForAccount(account));
-  const [clearanceRecords, setClearanceRecords] = useState<Record<string, StudentClearanceRecord>>(
-    () => getClearanceRecordsForAccount(account)
-  );
-  const [dues, setDues] = useState<CodeDue[]>(() => getDuesForAccount(account));
+  const { students, clearanceRecords, dues } = useFirebaseDataForAccount(account);
 
   // Filter type: either according to logged in authority, or toggleable
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'engineering' | 'puc'>(
@@ -104,16 +95,13 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
   const [previewCertStudent, setPreviewCertStudent] = useState<StudentProfile | null>(null);
   const [inspectStudent, setInspectStudent] = useState<StudentProfile | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
 
-  const reloadData = () => {
-    setStudents(getStudentsForAccount(account));
-    setClearanceRecords(getClearanceRecordsForAccount(account));
-    setDues(getDuesForAccount(account));
-  };
 
-  const handleApprove = (student: StudentProfile) => {
-    const res = hodApproveClearance({
+  const handleApprove = async (student: StudentProfile) => {
+    setIsSubmitting(true);
+    const res = await hodApproveClearance({
       studentId: student.id,
       staffName: account.officerName,
       designation: isDirector ? 'Director of Academics' : account.designation,
@@ -138,7 +126,8 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
       origin: { y: 0.6 },
     });
 
-    reloadData();
+    
+    setIsSubmitting(false);
   };
 
   const handleOpenReject = (student: StudentProfile) => {
@@ -149,9 +138,10 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
     });
   };
 
-  const handleConfirmReject = (reason: string) => {
+  const handleConfirmReject = async (reason: string) => {
+    setIsSubmitting(true);
     if (rejectModalConfig.studentId) {
-      const res = hodRejectClearance({
+      const res = await hodRejectClearance({
         studentId: rejectModalConfig.studentId,
         staffName: account.officerName,
         reason,
@@ -166,26 +156,31 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
           `Clearance returned. Official notice with reasons dispatched to ${student?.email || 'student'} from ${account.email}.`
         );
       }
-      reloadData();
+      
+    setIsSubmitting(false);
     }
   };
 
-  const handleResetPassword = (studentId: string) => {
-    const res = resetStudentPassword(studentId);
+  const handleResetPassword = async (studentId: string) => {
+    setIsSubmitting(true);
+    const res = await resetStudentPassword(studentId);
     if (res.success) {
       setSyncStatusMsg(`Password for ${studentId.toUpperCase()} reset to default (roll number).`);
       setTimeout(() => setSyncStatusMsg(null), 4000);
-      reloadData();
+      
+    setIsSubmitting(false);
     }
   };
 
-  const handleSyncDataset = () => {
-    const summary = syncStudentRecords(FULL_REAL_STUDENTS);
+  const handleSyncDataset = async () => {
+    setIsSubmitting(true);
+    const summary = await syncStudentRecords(FULL_REAL_STUDENTS);
     setSyncStatusMsg(
       `Registry synchronized: ${summary.total} records verified (${summary.added} new added, ${summary.updated} updated/retained).`
     );
     setTimeout(() => setSyncStatusMsg(null), 5000);
-    reloadData();
+    
+    setIsSubmitting(false);
     setIsSyncModalOpen(false);
   };
 
@@ -196,15 +191,15 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
       (d) => d.student_id.toLowerCase() === student.id.toLowerCase() && d.status !== 'Approved'
     );
     const totalPendingDues = studentDues.reduce((acc, d) => acc + d.amount, 0);
-    const depts = ['library', 'hostel', 'lab', 'finance', 'sports'] as const;
-    const approvedCount = rec ? depts.filter((d) => rec.departments[d]?.status === 'approved').length : 0;
-    const all5Approved = approvedCount === 5;
+    const depts = ['library', 'hostel', 'lab', 'finance', 'sports', 'itinfra'] as const;
+    const approvedCount = rec ? depts.filter((d) => rec?.departments?.[d]?.status === 'approved').length : 0;
+    const allApproved = approvedCount === 6;
     const isCertificateIssued = !!rec?.certificate_generated;
 
     let statusKey: 'ready_signoff' | 'in_progress' | 'has_dues' | 'cleared';
     if (isCertificateIssued) {
       statusKey = 'cleared';
-    } else if (all5Approved) {
+    } else if (allApproved) {
       statusKey = 'ready_signoff';
     } else if (studentDues.length > 0) {
       statusKey = 'has_dues';
@@ -217,7 +212,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
       studentDues,
       totalPendingDues,
       approvedCount,
-      all5Approved,
+      allApproved,
       isCertificateIssued,
       statusKey,
     };
@@ -239,11 +234,11 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
     });
   }, [students, categoryFilter, isDirector, directorBranchFilter]);
 
-  // Tab 1: Eligible students whose all 5 departments have approved
+  // Tab 1: Eligible students whose all 6 departments have approved
   const eligibleStudents = useMemo(() => {
     return jurisdictionStudents.filter((s) => {
       const stats = getStudentStats(s);
-      return stats.all5Approved;
+      return stats.allApproved;
     });
   }, [jurisdictionStudents, clearanceRecords, dues]);
 
@@ -315,6 +310,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
     { id: 'lab' as const, label: 'Lab', icon: <FlaskConical className="w-3.5 h-3.5" /> },
     { id: 'finance' as const, label: 'Finance', icon: <CreditCard className="w-3.5 h-3.5" /> },
     { id: 'sports' as const, label: 'Sports', icon: <Trophy className="w-3.5 h-3.5" /> },
+    { id: 'itinfra' as const, label: 'IT Infra', icon: <Laptop className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -433,7 +429,6 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
           </div>
 
           <button
-            onClick={reloadData}
             className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors border border-slate-700 cursor-pointer"
             title="Refresh queue"
           >
@@ -535,7 +530,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
               </span>
               <div className="flex items-center space-x-2 mt-2 text-xs text-slate-700 font-medium">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>5/5 Departments strictly verified before arriving in this sign-off desk</span>
+                <span>6/6 Departments strictly verified before arriving in this sign-off desk</span>
               </div>
             </div>
           </div>
@@ -664,11 +659,11 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
                       {/* 5-Department Digital Signatures Verification Grid */}
                       <div className="mt-5 pt-4 border-t border-slate-100">
                         <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-2.5">
-                          Statutory Department Clearances (5/5 Verified):
+                          Statutory Department Clearances (6/6 Verified):
                         </span>
-                        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+                        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                           {departmentMeta.map((d) => {
-                            const cl = record?.departments[d.id];
+                            const cl = record?.departments?.[d.id];
                             const sig = cl?.digital_signature;
                             return (
                               <div
@@ -804,7 +799,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
                 <span className="text-[11px] font-semibold text-slate-500 shrink-0 mr-1">Status:</span>
                 {[
                   { key: 'all' as const, label: 'All' },
-                  { key: 'ready_signoff' as const, label: 'Ready (5/5)' },
+                  { key: 'ready_signoff' as const, label: 'Ready (6/6)' },
                   { key: 'has_dues' as const, label: 'Dues' },
                   { key: 'in_progress' as const, label: 'Progress' },
                   { key: 'cleared' as const, label: 'Issued' },
@@ -873,7 +868,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
               <div className="space-y-3">
                 {filteredRecords.map((student) => {
                   const stats = getStudentStats(student);
-                  const { record, studentDues, totalPendingDues, approvedCount, all5Approved, isCertificateIssued } = stats;
+                  const { record, studentDues, totalPendingDues, approvedCount, allApproved, isCertificateIssued } = stats;
 
                   return (
                     <div
@@ -914,10 +909,10 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                               <span>Certificate Issued</span>
                             </span>
-                          ) : all5Approved ? (
+                          ) : allApproved ? (
                             <span className="inline-flex items-center space-x-1 px-3 py-1 bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg animate-pulse">
                               <Award className="w-3.5 h-3.5 text-amber-600" />
-                              <span>Ready for HOD Sign-Off (5/5)</span>
+                              <span>Ready for HOD Sign-Off (6/6)</span>
                             </span>
                           ) : studentDues.length > 0 ? (
                             <span className="inline-flex items-center space-x-1 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold rounded-lg">
@@ -927,7 +922,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
                           ) : (
                             <span className="inline-flex items-center space-x-1 px-3 py-1 bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-lg">
                               <Clock className="w-3.5 h-3.5 text-blue-600" />
-                              <span>In Progress ({approvedCount}/5)</span>
+                              <span>In Progress ({approvedCount}/6)</span>
                             </span>
                           )}
 
@@ -940,7 +935,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
                           </button>
 
                           {/* Direct HOD Actions */}
-                          {all5Approved && !isCertificateIssued && (
+                          {allApproved && !isCertificateIssued && (
                             <button
                               onClick={() => handleApprove(student)}
                               className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
@@ -971,24 +966,24 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
                               Department Clearance Progress:
                             </span>
                             <span className="text-xs font-bold font-mono text-slate-900">
-                              {approvedCount}/5 Cleared
+                              {approvedCount}/6 Cleared
                             </span>
                           </div>
                           {/* Progress bar */}
                           <div className="w-full sm:w-36 h-2 bg-slate-100 rounded-full overflow-hidden">
                             <div
                               className={`h-full transition-all duration-300 ${
-                                all5Approved ? 'bg-emerald-500' : 'bg-blue-600'
+                                allApproved ? 'bg-emerald-500' : 'bg-blue-600'
                               }`}
-                              style={{ width: `${(approvedCount / 5) * 100}%` }}
+                              style={{ width: `${(approvedCount / 6) * 100}%` }}
                             />
                           </div>
                         </div>
 
-                        {/* 5 Department Status Micro-Chips */}
-                        <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2">
+                        {/* 6 Department Status Micro-Chips */}
+                        <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-6 gap-2">
                           {departmentMeta.map((d) => {
-                            const deptCl = record?.departments[d.id];
+                            const deptCl = record?.departments?.[d.id];
                             const deptDue = studentDues.find((du) => du.department === d.id);
                             const isCleared = deptCl?.status === 'approved';
 
@@ -1351,7 +1346,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
               <div className="space-y-2">
                 {departmentMeta.map((dept) => {
                   const rec = clearanceRecords[inspectStudent.id.toLowerCase()];
-                  const deptInfo = rec?.departments[dept.id];
+                  const deptInfo = rec?.departments?.[dept.id];
                   const sig = deptInfo?.digital_signature;
                   const isApproved = deptInfo?.status === 'approved';
 
@@ -1426,7 +1421,7 @@ export const HodDashboard: React.FC<HodDashboardProps> = ({
               >
                 Close
               </button>
-              {getStudentStats(inspectStudent).all5Approved && !clearanceRecords[inspectStudent.id.toLowerCase()]?.certificate_generated && (
+              {getStudentStats(inspectStudent).allApproved && !clearanceRecords[inspectStudent.id.toLowerCase()]?.certificate_generated && (
                 <button
                   onClick={() => {
                     handleApprove(inspectStudent);

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, DollarSign, PlusCircle, User, X } from 'lucide-react';
 import { DepartmentId, StudentProfile } from '../types';
-import { getStudents } from '../utils/storage';
+import { getStudents, getClearanceRecords } from '../utils/storage';
 
 interface AddDueModalProps {
   department: DepartmentId;
@@ -26,6 +26,11 @@ export const AddDueModal: React.FC<AddDueModalProps> = ({
   const [reason, setReason] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const records = getClearanceRecords();
+  const selectedRecord = records[selectedStudentId];
+  const isCertified = selectedRecord?.certificate_generated === true;
+
 
   if (!isOpen) return null;
 
@@ -100,11 +105,17 @@ export const AddDueModal: React.FC<AddDueModalProps> = ({
               onChange={(e) => setSelectedStudentId(e.target.value)}
               className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-hidden font-medium"
             >
-              {students.map((st) => (
-                <option key={st.id} value={st.id}>
-                  {st.id.toUpperCase()} — {st.name} ({st.branch})
-                </option>
-              ))}
+              
+              {students.map((st) => {
+                const rec = records[st.id];
+                const cert = rec?.certificate_generated ? ' [✅ Certified]' : '';
+                return (
+                  <option key={st.id} value={st.id}>
+                    {st.id.toUpperCase()} — {st.name} ({st.branch}){cert}
+                  </option>
+                );
+              })}
+
             </select>
           </div>
 
@@ -148,24 +159,35 @@ export const AddDueModal: React.FC<AddDueModalProps> = ({
             </p>
           </div>
 
+          
+          {isCertified && (
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                <strong>Clearance Locked:</strong> This student's No-Dues Certificate has already been issued and digitally sealed (Cert Ref: {selectedRecord?.certificate_hash || 'Pending'}). New dues cannot be raised against a certified student. Please route through a Post-Certification Dispute/Reopen Request if necessary.
+              </span>
+            </div>
+          )}
+
           {/* Actions */}
-          <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 border-t border-slate-100">
+          <div className="pt-2 flex justify-end space-x-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors text-center cursor-pointer"
+              className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors"
             >
               Cancel
             </button>
             <button
-              id="btn-confirm-add-due"
               type="submit"
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-1.5 cursor-pointer text-center"
+              disabled={isCertified}
+              className={`px-4 py-2 text-sm font-semibold text-white rounded-xl flex items-center space-x-2 transition-colors ${isCertified ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-xs'}`}
             >
               <PlusCircle className="w-4 h-4" />
               <span>Issue Official Due</span>
             </button>
           </div>
+
         </form>
       </div>
     </div>

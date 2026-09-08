@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useFirebaseDataForAccount } from "../hooks/useFirebaseData";
 import {
   AlertCircle,
   BookOpen,
@@ -38,6 +39,7 @@ interface TransactionVerificationDashboardProps {
 export const TransactionVerificationDashboard: React.FC<TransactionVerificationDashboardProps> = ({
   account,
 }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [dues, setDues] = useState<CodeDue[]>([]);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | VerificationStatus>('all');
@@ -61,6 +63,7 @@ export const TransactionVerificationDashboard: React.FC<TransactionVerificationD
 
   useEffect(() => {
     reloadData();
+    setIsSubmitting(false);
   }, []);
 
   // Filter dues that have a submitted receipt (or any due that has verification_status)
@@ -119,6 +122,7 @@ export const TransactionVerificationDashboard: React.FC<TransactionVerificationD
     setApprovingDue(null);
     setApprovalRemarks('');
     reloadData();
+    setIsSubmitting(false);
   };
 
   const handleConfirmDenial = () => {
@@ -135,6 +139,7 @@ export const TransactionVerificationDashboard: React.FC<TransactionVerificationD
     setDenyingDue(null);
     setDenialReason('');
     reloadData();
+    setIsSubmitting(false);
   };
 
   const getDeptIcon = (deptId: DepartmentId) => {

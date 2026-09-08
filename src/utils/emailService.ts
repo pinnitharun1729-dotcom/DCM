@@ -1,3 +1,5 @@
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
 import { DepartmentId, EmailNotification, StudentProfile, DeptAccount, StudentClearanceRecord } from '../types';
 import { STATUTORY_DEPT_ACCOUNTS, ACADEMIC_ROLE_ACCOUNTS } from '../constants';
 import { generateNoDuesPDFDataUri, generateNoDuesPDFFilename } from './certificate';
@@ -97,7 +99,7 @@ export function getDepartmentEmailConfig(
 }
 
 // Retrieve all stored sent emails
-export function getAllSentEmails(): EmailNotification[] {
+export async function getAllSentEmails(): Promise<EmailNotification[]> {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(EMAIL_STORAGE_KEY);
@@ -109,7 +111,19 @@ export function getAllSentEmails(): EmailNotification[] {
 }
 
 // Save all emails to storage
-export function saveAllSentEmails(emails: EmailNotification[]): void {
+export async function saveAllSentEmails(emails: EmailNotification[]): Promise<void> {
+  const batch = writeBatch(db);
+  emails.forEach(e => {
+    const cleanEmail = { ...e };
+    Object.keys(cleanEmail).forEach(key => {
+      if ((cleanEmail as any)[key] === undefined) {
+        delete (cleanEmail as any)[key];
+      }
+    });
+    batch.set(doc(db, 'emails', cleanEmail.id), cleanEmail, { merge: true });
+  });
+  await batch.commit();
+
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(EMAIL_STORAGE_KEY, JSON.stringify(emails));
@@ -119,9 +133,9 @@ export function saveAllSentEmails(emails: EmailNotification[]): void {
 }
 
 // Get emails for a specific student (by studentId or official student email)
-export function getStudentEmails(studentIdentifier: string): EmailNotification[] {
+export async function getStudentEmails(studentIdentifier: string): Promise<EmailNotification[]> {
   const clean = studentIdentifier.trim().toLowerCase();
-  const all = getAllSentEmails();
+  const all = await getAllSentEmails();
   return all
     .filter(
       (e) =>
@@ -133,8 +147,10 @@ export function getStudentEmails(studentIdentifier: string): EmailNotification[]
 }
 
 // Mark an email as read
-export function markEmailAsRead(emailId: string): void {
-  const all = getAllSentEmails();
+export async function markEmailAsRead(emailId: string): Promise<void> {
+  await setDoc(doc(db, 'emails', emailId), { readStatus: 'read', readTimestamp: new Date().toISOString() }, { merge: true });
+
+  const all = await getAllSentEmails();
   let changed = false;
   const updated = all.map((e) => {
     if (e.id === emailId && !e.read) {
@@ -152,9 +168,9 @@ export function markEmailAsRead(emailId: string): void {
 }
 
 // Mark all emails as read for a student
-export function markAllStudentEmailsAsRead(studentIdentifier: string): void {
+export async function markAllStudentEmailsAsRead(studentIdentifier: string): Promise<void> {
   const clean = studentIdentifier.trim().toLowerCase();
-  const all = getAllSentEmails();
+  const all = await getAllSentEmails();
   let changed = false;
   const updated = all.map((e) => {
     if (
@@ -175,10 +191,10 @@ export function markAllStudentEmailsAsRead(studentIdentifier: string): void {
 }
 
 // Internal helper to dispatch an automated email with deduplication guarantee
-export function dispatchAutomatedEmail(
+export async function dispatchAutomatedEmail(
   emailData: Omit<EmailNotification, 'id' | 'timestamp'>
-): EmailNotification | null {
-  const all = getAllSentEmails();
+): Promise<EmailNotification | null> {
+  const all = await getAllSentEmails();
   const now = new Date();
   const nowTime = now.getTime();
 
@@ -235,7 +251,7 @@ function formatEmailDateTime(isoString: string): string {
 }
 
 // REQUIREMENT 1: Send Department Status Email (Approved or Denied)
-export function sendDepartmentStatusEmail(params: {
+export async function sendDepartmentStatusEmail(params: {
   student: StudentProfile;
   departmentId: DepartmentId | 'hod' | 'dean' | 'director';
   status: 'Approved' | 'Denied';
@@ -244,7 +260,7 @@ export function sendDepartmentStatusEmail(params: {
   reason?: string;
   pendingDueAmount?: number;
   account?: DeptAccount;
-}): EmailNotification | null {
+}): Promise<EmailNotification | null> {
   const { student, departmentId, status, staffName, designation, reason, pendingDueAmount, account } = params;
   const config = getDepartmentEmailConfig(departmentId, student, account);
   const formattedTime = formatEmailDateTime(new Date().toISOString());
@@ -304,7 +320,7 @@ ${config.name}
 Rajiv Gandhi University of Knowledge Technologies, RK Valley
 Official Portal: https://rguktrkv.ac.in`;
 
-  return dispatchAutomatedEmail({
+  const payload: any = {
     studentId: student.id,
     to: student.email,
     recipientName: student.name,
@@ -318,19 +334,22 @@ Official Portal: https://rguktrkv.ac.in`;
     status,
     subject,
     body,
-    reasonOrRemarks: reason,
-    pendingDueAmount,
-  });
+  };
+  
+  if (reason) payload.reasonOrRemarks = reason;
+  if (pendingDueAmount !== undefined) payload.pendingDueAmount = pendingDueAmount;
+
+  return dispatchAutomatedEmail(payload);
 }
 
 // REQUIREMENT 2: Send Final Certificate Email with PDF soft-copy attachment
-export function sendFinalCertificateEmail(params: {
+export async function sendFinalCertificateEmail(params: {
   student: StudentProfile;
   record: StudentClearanceRecord;
   approverName: string;
   approverDesignation: string;
   account?: DeptAccount;
-}): EmailNotification | null {
+}): Promise<EmailNotification | null> {
   const { student, record, approverName, approverDesignation, account } = params;
   const config = getDepartmentEmailConfig('hod', student, account);
   const formattedTime = formatEmailDateTime(new Date().toISOString());
@@ -340,7 +359,7 @@ export function sendFinalCertificateEmail(params: {
   // Generate the real PDF soft-copy data URI attachment
   let pdfDataUri = '';
   try {
-    pdfDataUri = generateNoDuesPDFDataUri(student, record);
+    pdfDataUri = await generateNoDuesPDFDataUri(student, record);
   } catch (err) {
     console.error('Failed to generate PDF attachment for email:', err);
   }

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useFirebaseDataForAccount } from "../hooks/useFirebaseData";
 import {
   AlertCircle,
   Building,
@@ -24,13 +25,9 @@ import { CodeDue, DepartmentId, DeptAccount, InAppNotification, StudentClearance
 import {
   addDue,
   approveDepartmentClearance,
-  getClearanceRecords,
-  getDuesForDepartment,
-  getStudents,
   rejectDepartmentClearance,
   rejectReceipt,
   verifyAndApproveReceipt,
-  getNotifications,
   markNotificationRead,
 } from '../utils/storage';
 import { AddDueModal } from '../components/AddDueModal';
@@ -48,32 +45,17 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
   account,
 }) => {
   const [activeTab, setActiveTab] = useState<'requests' | 'receipts'>('receipts');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'under_review' | 'approved' | 'rejected'>('all');
 
-  // Storage data
-  const [students, setStudents] = useState<StudentProfile[]>(() => getStudents());
-  const [clearanceRecords, setClearanceRecords] = useState<Record<string, StudentClearanceRecord>>(
-    () => getClearanceRecords()
-  );
-  const [dues, setDues] = useState<CodeDue[]>(() => getDuesForDepartment(department));
-  const [notifications, setNotifications] = useState<InAppNotification[]>(() =>
-    getNotifications('dept', department)
-  );
+  const { students: allStudents, clearanceRecords, dues: allDues, notifications: allNotifs } = useFirebaseDataForAccount(account);
+  
+  const students = useMemo(() => allStudents, [allStudents]);
+  const dues = useMemo(() => allDues.filter(d => d.department === department), [allDues, department]);
+  const notifications = useMemo(() => allNotifs.filter(n => n.recipient_type === 'dept' && n.recipient_id === department), [allNotifs, department]);
 
-  React.useEffect(() => {
-    const handleNotifUpdate = () => {
-      setNotifications(getNotifications('dept', department));
-    };
-    window.addEventListener('rgukt_notification_updated', handleNotifUpdate);
-    window.addEventListener('storage', handleNotifUpdate);
-    return () => {
-      window.removeEventListener('rgukt_notification_updated', handleNotifUpdate);
-      window.removeEventListener('storage', handleNotifUpdate);
-    };
-  }, [department]);
-
-  // Modals
   const [isAddDueOpen, setIsAddDueOpen] = useState(false);
 
   // Reject modal state
@@ -100,40 +82,49 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
     description: string;
   } | null>(null);
 
-  const reloadData = () => {
-    setStudents(getStudents());
-    setClearanceRecords(getClearanceRecords());
-    setDues(getDuesForDepartment(department));
-  };
-
   // Add Due
-  const handleAddDue = (params: {
+  
+  const handleAddDue = async (params: {
     student_id: string;
     department: DepartmentId;
     reason: string;
     amount: number;
   }) => {
-    addDue(params);
-    reloadData();
+    try {
+      await addDue(params);
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setIsSubmitting(false);
   };
 
+
   // Direct Approve Clearance
-  const handleApproveClearance = (studentId: string) => {
-    const st = students.find((s) => s.id === studentId);
-    approveDepartmentClearance({
-      studentId,
-      department,
-      staffName: account.officerName,
-      designation: account.designation,
-      account,
-    });
-    setActionNotice({
-      type: 'success',
-      title: `Clearance Approved for ${st?.name || studentId.toUpperCase()}`,
-      description: `Official approval email automatically dispatched to ${st?.email || 'student email'} from ${account.email}.`,
-    });
-    setTimeout(() => setActionNotice(null), 7000);
-    reloadData();
+  const handleApproveClearance = async (studentId: string) => {
+    setIsSubmitting(true);
+    setApprovingId(studentId);
+    try {
+      const st = students.find((s) => s.id === studentId);
+      await approveDepartmentClearance({
+        studentId,
+        department,
+        staffName: account.officerName,
+        designation: account.designation,
+        account,
+      });
+      setActionNotice({
+        type: 'success',
+        title: `Clearance Approved for ${st?.name || studentId.toUpperCase()}`,
+        description: `Official approval email automatically dispatched to ${st?.email || 'student email'} from ${account.email}.`,
+      });
+      setTimeout(() => setActionNotice(null), 7000);
+    } catch (err: any) {
+      console.error('Failed to approve clearance:', err);
+      alert(`Error approving clearance: ${err.message || 'Check console'}`);
+    } finally {
+      setIsSubmitting(false);
+      setApprovingId(null);
+    }
   };
 
   // Reject Clearance trigger
@@ -161,7 +152,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
       description: `Payment receipt for ₹${due.amount} verified and cleared. Clearance approval email dispatched from ${account.email}.`,
     });
     setTimeout(() => setActionNotice(null), 7000);
-    reloadData();
+    setIsSubmitting(false);
   };
 
   // Reject Receipt trigger
@@ -209,7 +200,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
       });
       setTimeout(() => setActionNotice(null), 7000);
     }
-    reloadData();
+    setIsSubmitting(false);
   };
 
   // Calculate statistics
@@ -221,16 +212,16 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
   const deniedTxReceipts = allSubmittedReceipts.filter((d) => d.verification_status === 'Denied');
 
   const clearedStudents = students.filter(
-    (s) => clearanceRecords[s.id]?.departments[department]?.status === 'approved'
+    (s) => clearanceRecords[s.id]?.departments?.[department]?.status === 'approved'
   );
   const pendingClearances = students.filter(
-    (s) => clearanceRecords[s.id]?.departments[department]?.status === 'pending'
+    (s) => clearanceRecords[s.id]?.departments?.[department]?.status === 'pending'
   );
 
   // Filtered students for Tab 1
   const filteredStudents = students.filter((s) => {
     const record = clearanceRecords[s.id];
-    const status = record?.departments[department]?.status || 'pending';
+    const status = record?.departments?.[department]?.status || 'pending';
 
     const matchesSearch =
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -278,13 +269,6 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
           >
             <PlusCircle className="w-4 h-4" />
             <span>Add Due Against Student</span>
-          </button>
-          <button
-            onClick={reloadData}
-            className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer min-h-[40px] sm:min-h-0 flex items-center justify-center"
-            title="Refresh department roster"
-          >
-            <RefreshCw className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -352,9 +336,6 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                 key={notif.id}
                 onClick={() => {
                   markNotificationRead(notif.id);
-                  setNotifications((prev) =>
-                    prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n))
-                  );
                 }}
                 className={`py-2.5 px-2 flex items-start space-x-3 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer ${
                   !notif.read ? 'bg-blue-50/40' : ''
@@ -757,9 +738,9 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                   ) : (
                     filteredStudents.map((st) => {
                       const record = clearanceRecords[st.id];
-                      const clearance = record?.departments[department];
+                      const clearance = record?.departments?.[department];
                       const status = clearance?.status || 'pending';
-                      const studentDues = dues.filter((d) => d.student_id === st.id);
+                      const studentDues = dues.filter((d) => d.student_id === st.id && d.department === department);
                       const hasUnpaidDues = studentDues.some(
                         (d) =>
                           d.status === 'Unpaid' ||
@@ -903,10 +884,10 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                                 </button>
                                 <button
                                   id={`btn-approve-dept-clearance-${st.id}`}
-                                  disabled={hasUnpaidDues}
+                                  disabled={hasUnpaidDues || approvingId === st.id}
                                   onClick={() => handleApproveClearance(st.id)}
-                                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
-                                    hasUnpaidDues
+                                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors flex items-center space-x-1 ${
+                                    hasUnpaidDues || approvingId === st.id
                                       ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                                       : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer'
                                   }`}
@@ -916,7 +897,14 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                                       : 'Digitally approve clearance and apply signature'
                                   }
                                 >
-                                  Approve Clearance
+                                  {approvingId === st.id ? (
+                                    <>
+                                      <div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                                      <span>Approving...</span>
+                                    </>
+                                  ) : (
+                                    <span>Approve Clearance</span>
+                                  )}
                                 </button>
                               </>
                             )}

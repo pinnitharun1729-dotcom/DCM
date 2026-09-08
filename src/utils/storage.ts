@@ -1,3 +1,5 @@
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
 import {
   AuthSession,
   CodeDue,
@@ -49,7 +51,7 @@ export function safeGetItem(key: string): string | null {
   return inMemoryFallbackStore.get(key) || null;
 }
 
-export function safeRemoveItem(key: string): void {
+export async function safeRemoveItem(key: string): Promise<void> {
   if (typeof window !== 'undefined') {
     try {
       localStorage.removeItem(key);
@@ -187,7 +189,7 @@ export function getStudentBranchCode(
 }
 
 // Initialize default storage data if missing or upgrade from older seed
-export function initStorage(): void {
+export async function initStorage(): Promise<void> {
   if (typeof window === 'undefined') return;
 
   // Emergency Quarantine & Sanitization:
@@ -359,24 +361,25 @@ export function initStorage(): void {
   }
 
   // Initialize seed emails for r240086 if no emails exist in storage
-  if (getAllSentEmails().length === 0) {
+  const sentEmails = await getAllSentEmails();
+  if (sentEmails.length === 0) {
     const student = SEED_STUDENTS.find((s) => s.id === 'r240086');
     if (student) {
-      sendDepartmentStatusEmail({
+      await sendDepartmentStatusEmail({
         student,
         departmentId: 'sports',
         status: 'Approved',
         staffName: 'Mr. B. Naidu',
         designation: 'Physical Director & Head of Athletics',
       });
-      sendDepartmentStatusEmail({
+      await sendDepartmentStatusEmail({
         student,
         departmentId: 'lab',
         status: 'Approved',
         staffName: 'Dr. P. Ramesh Babu',
         designation: 'Central Lab In-charge & Workshop Superintendent',
       });
-      sendDepartmentStatusEmail({
+      await sendDepartmentStatusEmail({
         student,
         departmentId: 'finance',
         status: 'Approved',
@@ -392,7 +395,7 @@ export function initStorage(): void {
  * If record exists, updates attributes while preserving user-altered state (like changed passwords).
  * If record is new, adds it.
  */
-export function syncStudentRecords(sourceStudents: StudentProfile[] = SEED_STUDENTS): { added: number; updated: number; total: number } {
+export async function syncStudentRecords(sourceStudents: StudentProfile[] = SEED_STUDENTS): Promise<{ added: number; updated: number; total: number }> {
   if (typeof window === 'undefined') return { added: 0, updated: 0, total: 0 };
   const raw = safeGetItem(STORAGE_KEYS.STUDENTS);
   const existingList: StudentProfile[] = raw ? JSON.parse(raw) : [];
@@ -500,9 +503,9 @@ export function getStudentsForAccount(account: DeptAccount): StudentProfile[] {
 /**
  * Data-query level filter for clearance records matching authorized students.
  */
-export function getClearanceRecordsForAccount(
+export async function getClearanceRecordsForAccount(
   account: DeptAccount
-): Record<string, StudentClearanceRecord> {
+): Promise<Record<string, StudentClearanceRecord>> {
   const allRecords = getClearanceRecords();
   const authorizedStudents = getStudentsForAccount(account);
   const authStudentIds = new Set(authorizedStudents.map((s) => s.id.toLowerCase()));
@@ -536,7 +539,8 @@ export function getStudentById(studentId: string): StudentProfile | undefined {
   );
 }
 
-export function saveStudent(student: StudentProfile): void {
+export async function saveStudent(student: StudentProfile): Promise<void> {
+  await setDoc(doc(db, 'students', student.id.toLowerCase()), student, { merge: true });
   const students = getStudents();
   const index = students.findIndex((s) => s.id.toLowerCase() === student.id.toLowerCase());
   if (index >= 0) {
@@ -552,15 +556,15 @@ export function saveStudent(student: StudentProfile): void {
  * Username/ID: official email or roll number
  * Default password: roll number (lowercase)
  */
-export function authenticateStudent(
+export async function authenticateStudent(
   identifier: string,
   plainPassword: string
-): {
+): Promise<{
   success: boolean;
   student?: StudentProfile;
   error?: string;
   requiresPasswordChange?: boolean;
-} {
+}> {
   initStorage();
   const trimmedId = identifier.trim().toLowerCase();
   const rollCandidate = trimmedId.includes('@') ? trimmedId.split('@')[0] : trimmedId;
@@ -594,7 +598,7 @@ export function authenticateStudent(
 
   // Update last login
   student.lastLogin = new Date().toISOString();
-  saveStudent(student);
+  await saveStudent(student);
 
   return {
     success: true,
@@ -606,10 +610,10 @@ export function authenticateStudent(
 /**
  * Updates a student's password and marks hasChangedPassword as true
  */
-export function updateStudentPassword(
+export async function updateStudentPassword(
   studentId: string,
   newPasswordPlain: string
-): { success: boolean; error?: string } {
+): Promise<{ success: boolean; error?: string }> {
   const student = getStudentById(studentId);
   if (!student) {
     return { success: false, error: 'Student not found' };
@@ -620,14 +624,14 @@ export function updateStudentPassword(
 
   student.passwordHash = hashPassword(newPasswordPlain.trim());
   student.hasChangedPassword = true;
-  saveStudent(student);
+  await saveStudent(student);
   return { success: true };
 }
 
 /**
  * Resets a student's password back to default roll number
  */
-export function resetStudentPassword(studentId: string): { success: boolean; error?: string } {
+export async function resetStudentPassword(studentId: string): Promise<{ success: boolean; error?: string }> {
   const student = getStudentById(studentId);
   if (!student) {
     return { success: false, error: 'Student not found' };
@@ -635,23 +639,32 @@ export function resetStudentPassword(studentId: string): { success: boolean; err
   const defaultPlain = student.id.toLowerCase();
   student.passwordHash = hashPassword(defaultPlain);
   student.hasChangedPassword = false;
-  saveStudent(student);
+  await saveStudent(student);
   return { success: true };
 }
 
 // Clearance Records
 export function getClearanceRecords(): Record<string, StudentClearanceRecord> {
   initStorage();
-  const raw = safeGetItem(STORAGE_KEYS.CLEARANCE_RECORDS);
+  const raw = typeof window !== 'undefined' ? safeGetItem(STORAGE_KEYS.CLEARANCE_RECORDS) : null;
   return raw ? JSON.parse(raw) : INITIAL_CLEARANCE_RECORDS;
 }
 
-export function getClearanceRecord(studentId: string): StudentClearanceRecord {
-  const records = getClearanceRecords();
+export async function getClearanceRecord(studentId: string): Promise<StudentClearanceRecord> {
   const normalizedId = studentId.toLowerCase();
-  if (records[normalizedId]) {
-    return records[normalizedId];
+  
+  // Try fetching from Firestore first
+  const docRef = doc(db, 'clearanceRecords', normalizedId);
+  const snapshot = await getDoc(docRef);
+  if (snapshot.exists()) {
+    const data = snapshot.data() as StudentClearanceRecord;
+    // Sync local storage
+    const records = getClearanceRecords();
+    records[normalizedId] = data;
+    safeSetItem(STORAGE_KEYS.CLEARANCE_RECORDS, JSON.stringify(records));
+    return data;
   }
+
   // If not found, create a blank pending clearance record
   const defaultRec: StudentClearanceRecord = {
     student_id: normalizedId,
@@ -661,14 +674,16 @@ export function getClearanceRecord(studentId: string): StudentClearanceRecord {
       lab: { department: 'lab', status: 'pending', last_updated: new Date().toISOString() },
       finance: { department: 'finance', status: 'pending', last_updated: new Date().toISOString() },
       sports: { department: 'sports', status: 'pending', last_updated: new Date().toISOString() },
+      itinfra: { department: 'itinfra', status: 'pending', last_updated: new Date().toISOString() },
     },
     certificate_generated: false,
   };
-  saveClearanceRecord(defaultRec);
+  await saveClearanceRecord(defaultRec);
   return defaultRec;
 }
 
-export function saveClearanceRecord(record: StudentClearanceRecord): void {
+export async function saveClearanceRecord(record: StudentClearanceRecord): Promise<void> {
+  await setDoc(doc(db, 'clearanceRecords', record.student_id.toLowerCase()), record, { merge: true });
   const records = getClearanceRecords();
   records[record.student_id.toLowerCase()] = record;
   safeSetItem(STORAGE_KEYS.CLEARANCE_RECORDS, JSON.stringify(records));
@@ -701,7 +716,9 @@ export function getDuesForDepartment(dept: DepartmentId): CodeDue[] {
   return dues.filter((d) => d.department === dept);
 }
 
-export function saveDue(due: CodeDue): void {
+export async function saveDue(due: CodeDue): Promise<void> {
+  await setDoc(doc(db, 'dues', due.id), due, { merge: true });
+  await setDoc(doc(db, 'dues', due.id), due, { merge: true });
   // If receipt is large (> 20KB), offload full document to IndexedDB and keep light SVG badge
   if (due.receipt_url && due.receipt_url.length > 20000) {
     saveReceiptToStorage(due.id, due.receipt_url);
@@ -726,13 +743,20 @@ export function saveDue(due: CodeDue): void {
   safeSetItem(STORAGE_KEYS.DUES, JSON.stringify(dues));
 }
 
-export function addDue(params: {
+
+export async function addDue(params: {
   student_id: string;
   department: DepartmentId;
   reason: string;
   amount: number;
-}): CodeDue {
+}): Promise<CodeDue> {
+  const rec = await getClearanceRecord(params.student_id);
+  if (rec.certificate_generated) {
+    throw new Error('Certificate Lock: This student\'s No-Dues Certificate has already been issued and digitally sealed. New dues cannot be raised against a certified student.');
+  }
+
   const newDue: CodeDue = {
+
     id: `due-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     student_id: params.student_id.toLowerCase(),
     department: params.department,
@@ -743,23 +767,21 @@ export function addDue(params: {
     updated_at: new Date().toISOString(),
   };
 
-  saveDue(newDue);
+  await saveDue(newDue);
 
   // Mark student's department status as pending
-  const rec = getClearanceRecord(params.student_id);
   rec.departments[params.department] = {
     department: params.department,
     status: 'pending',
-    rejection_reason: undefined,
     last_updated: new Date().toISOString(),
   };
   // Also reset certificate if it was generated
   rec.certificate_generated = false;
-  saveClearanceRecord(rec);
+  await saveClearanceRecord(rec);
 
   // Add in-app notification to student
   const student = getStudentById(params.student_id);
-  addNotification({
+  await addNotification({
     recipient_type: 'student',
     recipient_id: params.student_id,
     title: `New Due Added: ${params.department.toUpperCase()}`,
@@ -772,12 +794,12 @@ export function addDue(params: {
 
 // Student uploads receipt for a due
 // NEW REQUIRED FLOW: Routes first to Transaction Verification queue (Finance Officer)
-export function submitDueReceipt(params: {
+export async function submitDueReceipt(params: {
   dueId: string;
   receiptUrl: string;
   receiptFileName?: string;
   transactionRef?: string;
-}): void {
+}): Promise<void> {
   const dues = getDues();
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
@@ -803,37 +825,48 @@ export function submitDueReceipt(params: {
 
   // Route to Transaction Verification queue (Pending review by Finance Officer)
   due.verification_status = 'Pending';
-  due.verification_officer = undefined;
-  due.verification_timestamp = undefined;
-  due.verification_remarks = undefined;
-  saveDue(due);
+  delete due.verification_officer;
+  delete due.verification_timestamp;
+  delete due.verification_remarks;
+  await saveDue(due);
 
   // Update department status to 'under_review'
-  const rec = getClearanceRecord(due.student_id);
+  const rec = await getClearanceRecord(due.student_id);
   rec.departments[due.department] = {
     ...rec.departments[due.department],
     status: 'under_review',
     last_updated: new Date().toISOString(),
   };
-  saveClearanceRecord(rec);
+  await saveClearanceRecord(rec);
 
+  
   // Internal notification to Transaction Verification Officer (Finance Officer)
   const student = getStudentById(due.student_id);
-  addNotification({
+  await addNotification({
     recipient_type: 'dept',
     recipient_id: 'verification',
     title: `New Transaction Awaiting Verification (${due.student_id.toUpperCase()})`,
     message: `Payment receipt submitted for ₹${due.amount} (${due.reason}) in ${due.department.toUpperCase()}. SBI Ref: ${due.transaction_ref || 'N/A'}. Awaiting Transaction Verification.`,
     type: 'info',
   });
+
+  // Notification to the original department admin
+  await addNotification({
+    recipient_type: 'dept',
+    recipient_id: due.department,
+    title: `Payment Receipt Submitted (${due.student_id.toUpperCase()})`,
+    message: `Student ${student?.name || due.student_id.toUpperCase()} submitted a payment/transaction proof for ₹${due.amount} (${due.reason}). Currently awaiting finance verification.`,
+    type: 'info',
+  });
 }
 
+
 // Transaction Verification (Finance Officer) approves transaction reference and receipt
-export function approveTransactionVerification(params: {
+export async function approveTransactionVerification(params: {
   dueId: string;
   officerName: string;
   remarks?: string;
-}): void {
+}): Promise<void> {
   const dues = getDues();
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
@@ -843,12 +876,12 @@ export function approveTransactionVerification(params: {
   due.verification_timestamp = new Date().toISOString();
   due.verification_remarks = params.remarks || 'SBI Collect transaction verified against university accounts.';
   due.updated_at = new Date().toISOString();
-  saveDue(due);
+  await saveDue(due);
 
   // Notify concerned department admin that payment receipt has been verified by finance officer
   // and is now actionable in their dashboard
   const student = getStudentById(due.student_id);
-  addNotification({
+  await addNotification({
     recipient_type: 'dept',
     recipient_id: due.department,
     title: `Payment Verified by Finance (${student?.name || due.student_id.toUpperCase()})`,
@@ -858,11 +891,11 @@ export function approveTransactionVerification(params: {
 }
 
 // Transaction Verification (Finance Officer) denies/rejects transaction reference
-export function denyTransactionVerification(params: {
+export async function denyTransactionVerification(params: {
   dueId: string;
   officerName: string;
   reason: string;
-}): void {
+}): Promise<void> {
   const dues = getDues();
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
@@ -872,11 +905,11 @@ export function denyTransactionVerification(params: {
   due.verification_timestamp = new Date().toISOString();
   due.verification_remarks = params.reason;
   due.updated_at = new Date().toISOString();
-  saveDue(due);
+  await saveDue(due);
 
   // Notify concerned department admin that payment was not verified
   const student = getStudentById(due.student_id);
-  addNotification({
+  await addNotification({
     recipient_type: 'dept',
     recipient_id: due.department,
     title: `Payment Not Verified: Tx Denied (${student?.name || due.student_id.toUpperCase()})`,
@@ -886,11 +919,11 @@ export function denyTransactionVerification(params: {
 }
 
 // Department admin verifies and approves receipt (only after Transaction Verification has approved)
-export function verifyAndApproveReceipt(params: {
+export async function verifyAndApproveReceipt(params: {
   dueId: string;
   staffName: string;
   designation: string;
-}): void {
+}): Promise<void> {
   const dues = getDues();
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
@@ -903,7 +936,7 @@ export function verifyAndApproveReceipt(params: {
 
   due.status = 'Approved';
   due.updated_at = new Date().toISOString();
-  saveDue(due);
+  await saveDue(due);
 
   // Check if any other unpaid/receipt-submitted dues remain for this student in this dept
   const studentDues = getDues(due.student_id).filter((d) => d.department === due.department);
@@ -914,7 +947,7 @@ export function verifyAndApproveReceipt(params: {
   if (!hasRemainingUnresolved) {
     // Mark department as cleared / approved with digital signature
     const hash = generateVerificationHash(due.department, due.student_id);
-    const rec = getClearanceRecord(due.student_id);
+    const rec = await getClearanceRecord(due.student_id);
     rec.departments[due.department] = {
       department: due.department,
       status: 'approved',
@@ -927,12 +960,12 @@ export function verifyAndApproveReceipt(params: {
       },
       last_updated: new Date().toISOString(),
     };
-    saveClearanceRecord(rec);
+    await saveClearanceRecord(rec);
 
     // Automated Email Notification to student (Requirement 1)
     const student = getStudentById(due.student_id);
     if (student) {
-      sendDepartmentStatusEmail({
+      await sendDepartmentStatusEmail({
         student,
         departmentId: due.department,
         status: 'Approved',
@@ -941,11 +974,11 @@ export function verifyAndApproveReceipt(params: {
       });
     }
 
-    checkAndForwardToHod(due.student_id);
+    await checkAndForwardToHod(due.student_id);
   }
 
   // Notification to student
-  addNotification({
+  await addNotification({
     recipient_type: 'student',
     recipient_id: due.student_id,
     title: `Payment Receipt Approved (${due.department.toUpperCase()})`,
@@ -955,11 +988,11 @@ export function verifyAndApproveReceipt(params: {
 }
 
 // Department admin rejects receipt
-export function rejectReceipt(params: {
+export async function rejectReceipt(params: {
   dueId: string;
   adminComment: string;
   staffName: string;
-}): void {
+}): Promise<void> {
   const dues = getDues();
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
@@ -967,20 +1000,20 @@ export function rejectReceipt(params: {
   due.status = 'Rejected';
   due.admin_comment = params.adminComment;
   due.updated_at = new Date().toISOString();
-  saveDue(due);
+  await saveDue(due);
 
   // Department status returns to 'pending' or 'rejected'
-  const rec = getClearanceRecord(due.student_id);
+  const rec = await getClearanceRecord(due.student_id);
   rec.departments[due.department] = {
     ...rec.departments[due.department],
     status: 'pending',
     rejection_reason: `Receipt rejected: ${params.adminComment}`,
     last_updated: new Date().toISOString(),
   };
-  saveClearanceRecord(rec);
+  await saveClearanceRecord(rec);
 
   // Notification to student
-  addNotification({
+  await addNotification({
     recipient_type: 'student',
     recipient_id: due.student_id,
     title: `Receipt Rejected (${due.department.toUpperCase()})`,
@@ -991,7 +1024,7 @@ export function rejectReceipt(params: {
   // Automated Email Notification to student (Requirement 1)
   const student = getStudentById(due.student_id);
   if (student) {
-    sendDepartmentStatusEmail({
+    await sendDepartmentStatusEmail({
       student,
       departmentId: due.department,
       status: 'Denied',
@@ -1003,104 +1036,111 @@ export function rejectReceipt(params: {
 }
 
 // Department direct approve clearance (for student who has no dues)
-export function approveDepartmentClearance(params: {
+export async function approveDepartmentClearance(params: {
   studentId: string;
   department: DepartmentId;
   staffName: string;
   designation: string;
   account?: DeptAccount;
-}): void {
+}): Promise<void> {
   const hash = generateVerificationHash(params.department, params.studentId);
-  const rec = getClearanceRecord(params.studentId);
-  rec.departments[params.department] = {
-    department: params.department,
-    status: 'approved',
-    digital_signature: {
+  await getClearanceRecord(params.studentId); // Ensure document exists
+  const docRef = doc(db, 'clearanceRecords', params.studentId.toLowerCase());
+  
+  const now = new Date().toISOString();
+  await updateDoc(docRef, {
+    [`departments.${params.department}.department`]: params.department,
+    [`departments.${params.department}.status`]: 'approved',
+    [`departments.${params.department}.digital_signature`]: {
       staff_name: params.staffName,
       designation: params.designation,
       department: params.department,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       verification_hash: hash,
     },
-    last_updated: new Date().toISOString(),
-  };
-  saveClearanceRecord(rec);
+    [`departments.${params.department}.last_updated`]: now,
+  });
 
-  addNotification({
+  
+  // Keep local storage in sync for legacy code
+  const records = getClearanceRecords();
+  if (records[params.studentId.toLowerCase()]) {
+    records[params.studentId.toLowerCase()].departments[params.department] = {
+      department: params.department,
+      status: 'approved',
+      digital_signature: {
+        staff_name: params.staffName,
+        designation: params.designation,
+        department: params.department,
+        timestamp: now,
+        verification_hash: hash,
+      },
+      last_updated: now,
+    };
+    safeSetItem(STORAGE_KEYS.CLEARANCE_RECORDS, JSON.stringify(records));
+  }
+
+  // Notification to student
+  await addNotification({
     recipient_type: 'student',
     recipient_id: params.studentId,
-    title: `Clearance Approved: ${params.department.toUpperCase()}`,
-    message: `${params.department.toUpperCase()} has digitally signed and approved your no-dues clearance.`,
+    title: `Department Cleared: ${params.department.toUpperCase()}`,
+    message: `${params.department.toUpperCase()} has digitally cleared your dues. Signature affixed by ${params.staffName}.`,
     type: 'success',
   });
 
-  // Automated Email Notification to student (Requirement 1)
-  const student = getStudentById(params.studentId);
-  if (student) {
-    sendDepartmentStatusEmail({
-      student,
-      departmentId: params.department,
-      status: 'Approved',
-      staffName: params.staffName,
-      designation: params.designation,
-      account: params.account,
-    });
-  }
+  await checkAndForwardToHod(params.studentId);
 
-  checkAndForwardToHod(params.studentId);
 }
 
 // Department reject clearance
-export function rejectDepartmentClearance(params: {
+export async function rejectDepartmentClearance(params: {
   studentId: string;
   department: DepartmentId;
   reason: string;
   staffName: string;
   designation?: string;
   account?: DeptAccount;
-}): void {
-  const rec = getClearanceRecord(params.studentId);
-  rec.departments[params.department] = {
-    department: params.department,
-    status: 'rejected',
-    rejection_reason: params.reason,
-    last_updated: new Date().toISOString(),
-  };
-  saveClearanceRecord(rec);
+}): Promise<void> {
+  await getClearanceRecord(params.studentId); // Ensure document exists
+  const docRef = doc(db, 'clearanceRecords', params.studentId.toLowerCase());
+  const now = new Date().toISOString();
 
-  addNotification({
-    recipient_type: 'student',
-    recipient_id: params.studentId,
-    title: `Clearance Rejected: ${params.department.toUpperCase()}`,
-    message: `Your clearance was rejected by ${params.staffName}: "${params.reason}". Please contact the department.`,
-    type: 'error',
+  await updateDoc(docRef, {
+    [`departments.${params.department}.department`]: params.department,
+    [`departments.${params.department}.status`]: 'rejected',
+    [`departments.${params.department}.rejection_reason`]: params.reason,
+    [`departments.${params.department}.last_updated`]: now,
   });
 
-  // Check if student has pending dues in this department
-  const dues = getDues(params.studentId).filter((d) => d.department === params.department);
-  const dueAmount = dues.reduce((sum, d) => (d.status !== 'Approved' ? sum + d.amount : sum), 0);
+  const records = getClearanceRecords();
+  if (records[params.studentId.toLowerCase()]) {
+    records[params.studentId.toLowerCase()].departments[params.department] = {
+      department: params.department,
+      status: 'rejected',
+      rejection_reason: params.reason,
+      last_updated: now,
+    };
 
-  // Automated Email Notification to student (Requirement 1)
-  const student = getStudentById(params.studentId);
-  if (student) {
-    sendDepartmentStatusEmail({
-      student,
-      departmentId: params.department,
-      status: 'Denied',
-      reason: params.reason,
-      staffName: params.staffName,
-      designation: params.designation,
-      pendingDueAmount: dueAmount > 0 ? dueAmount : undefined,
-      account: params.account,
-    });
+    safeSetItem(STORAGE_KEYS.CLEARANCE_RECORDS, JSON.stringify(records));
   }
+
+  // Notification to student
+  await addNotification({
+    recipient_type: 'student',
+    recipient_id: params.studentId,
+    title: `Clearance Disapproved: ${params.department.toUpperCase()}`,
+    message: `${params.department.toUpperCase()} has disapproved your clearance. Reason: ${params.reason}.`,
+    type: 'error',
+  });
 }
 
-// Check if all 5 departments have approved -> trigger auto-forward to HOD or Dean
-export function checkAndForwardToHod(studentId: string): void {
-  const rec = getClearanceRecord(studentId);
+
+// Check if all 6 departments have approved -> trigger auto-forward to HOD or Dean
+export async function checkAndForwardToHod(studentId: string): Promise<void> {
+  const rec = await getClearanceRecord(studentId);
   const student = getStudentById(studentId);
-  const deptKeys: DepartmentId[] = ['library', 'hostel', 'lab', 'finance', 'sports'];
+  const deptKeys: DepartmentId[] = ['library', 'hostel', 'lab', 'finance', 'sports', 'itinfra'];
   const allApproved = deptKeys.every((k) => rec.departments[k]?.status === 'approved');
 
   if (allApproved && !rec.hod_approval) {
@@ -1108,32 +1148,32 @@ export function checkAndForwardToHod(studentId: string): void {
     const approverTitle = isPuc ? 'Dean of Academics' : 'Head of Department (HOD)';
     const recipientId = isPuc ? 'dean' : 'hod';
 
-    addNotification({
+    await addNotification({
       recipient_type: 'student',
       recipient_id: studentId,
-      title: 'All 5 Departments Cleared! Forwarded for Final Sign-off',
-      message: `All five university departments have granted digital clearance. Your application is now with the ${approverTitle} for final approval.`,
+      title: 'All 6 Departments Cleared! Forwarded for Final Sign-off',
+      message: `All six university departments have granted digital clearance. Your application is now with the ${approverTitle} for final approval.`,
       type: 'success',
     });
 
-    addNotification({
+    await addNotification({
       recipient_type: 'hod',
       recipient_id: recipientId,
       title: `Final Sign-off Required: ${student?.name || studentId}`,
-      message: `${student?.name} (${student?.id.toUpperCase()}, ${student?.branch}) has cleared all 5 departments and is awaiting your final signature.`,
+      message: `${student?.name} (${student?.id.toUpperCase()}, ${student?.branch}) has cleared all 6 departments and is awaiting your final signature.`,
       type: 'info',
     });
   }
 }
 
 // HOD or Dean final approval -> triggers certificate generation
-export function hodApproveClearance(params: {
+export async function hodApproveClearance(params: {
   studentId: string;
   staffName: string;
   designation: string;
   remarks?: string;
   account?: DeptAccount;
-}): { success: boolean; error?: string } {
+}): Promise<{ success: boolean; error?: string }> {
   const student = getStudentById(params.studentId);
   if (!student) return { success: false, error: 'Student record not found.' };
 
@@ -1156,7 +1196,7 @@ export function hodApproveClearance(params: {
     }
   }
 
-  const rec = getClearanceRecord(params.studentId);
+  const rec = await getClearanceRecord(params.studentId);
   const certHash = generateCertificateNumber(params.studentId, student?.branch || 'ENG');
   const sigHash = generateVerificationHash('FINAL-SIG', params.studentId);
 
@@ -1171,9 +1211,9 @@ export function hodApproveClearance(params: {
   rec.certificate_generated = true;
   rec.certificate_hash = certHash;
   rec.certificate_date = new Date().toISOString();
-  saveClearanceRecord(rec);
+  await saveClearanceRecord(rec);
 
-  addNotification({
+  await addNotification({
     recipient_type: 'student',
     recipient_id: params.studentId,
     title: '🎉 Digital No-Dues Certificate Issued!',
@@ -1182,7 +1222,7 @@ export function hodApproveClearance(params: {
   });
 
   // Automated Final Certificate Email with PDF soft-copy attachment (Requirement 2)
-  sendFinalCertificateEmail({
+  await sendFinalCertificateEmail({
     student,
     record: rec,
     approverName: params.staffName,
@@ -1194,12 +1234,12 @@ export function hodApproveClearance(params: {
 }
 
 // HOD or Dean rejection
-export function hodRejectClearance(params: {
+export async function hodRejectClearance(params: {
   studentId: string;
   staffName: string;
   reason: string;
   account?: DeptAccount;
-}): { success: boolean; error?: string } {
+}): Promise<{ success: boolean; error?: string }> {
   const student = getStudentById(params.studentId);
   if (!student) return { success: false, error: 'Student record not found.' };
 
@@ -1222,13 +1262,13 @@ export function hodRejectClearance(params: {
     }
   }
 
-  const rec = getClearanceRecord(params.studentId);
-  rec.hod_approval = undefined;
+  const rec = await getClearanceRecord(params.studentId);
+  delete rec.hod_approval;
   rec.certificate_generated = false;
   // Mark one or flag
-  saveClearanceRecord(rec);
+  await saveClearanceRecord(rec);
 
-  addNotification({
+  await addNotification({
     recipient_type: 'student',
     recipient_id: params.studentId,
     title: 'Application Returned by HOD / Academic Authority',
@@ -1237,7 +1277,7 @@ export function hodRejectClearance(params: {
   });
 
   // Automated Email Notification to student (Requirement 1)
-  sendDepartmentStatusEmail({
+  await sendDepartmentStatusEmail({
     student,
     departmentId: 'hod',
     status: 'Denied',
@@ -1274,9 +1314,9 @@ export function getNotifications(
   }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 }
 
-export function addNotification(
+export async function addNotification(
   notif: Omit<InAppNotification, 'id' | 'timestamp' | 'read'>
-): InAppNotification {
+): Promise<InAppNotification> {
   const list = getNotifications();
   const newNotif: InAppNotification = {
     ...notif,
@@ -1296,7 +1336,7 @@ export function addNotification(
   return newNotif;
 }
 
-export function markNotificationRead(id: string): void {
+export async function markNotificationRead(id: string): Promise<void> {
   const list = getNotifications();
   const found = list.find((n) => n.id === id);
   if (found) {
@@ -1308,7 +1348,7 @@ export function markNotificationRead(id: string): void {
   }
 }
 
-export function markAllNotificationsRead(recipientType?: 'student' | 'dept' | 'hod' | 'all', recipientId?: string): void {
+export async function markAllNotificationsRead(recipientType?: 'student' | 'dept' | 'hod' | 'all', recipientId?: string): Promise<void> {
   const list = getNotifications();
   list.forEach((n) => {
     if (!recipientType) {
@@ -1335,16 +1375,16 @@ export function getSession(): AuthSession | null {
   return raw ? JSON.parse(raw) : null;
 }
 
-export function setSession(session: AuthSession): void {
+export async function setSession(session: AuthSession): Promise<void> {
   safeSetItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
 }
 
-export function clearSession(): void {
+export async function clearSession(): Promise<void> {
   safeRemoveItem(STORAGE_KEYS.SESSION);
 }
 
 // Reset database for test convenience
-export function resetDemoData(): void {
+export async function resetDemoData(): Promise<void> {
   safeSetItem(STORAGE_KEYS.STUDENTS, JSON.stringify(SEED_STUDENTS));
   safeSetItem(
     STORAGE_KEYS.CLEARANCE_RECORDS,

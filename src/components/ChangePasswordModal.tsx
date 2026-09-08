@@ -25,7 +25,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -45,22 +45,20 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      const res = updateStudentPassword(student.id, newPassword);
-      setIsSubmitting(false);
+    const res = await updateStudentPassword(student.id, newPassword);
+    setIsSubmitting(false);
 
-      if (res.success) {
-        setIsSuccess(true);
-        setTimeout(() => {
-          onComplete({
-            ...student,
-            hasChangedPassword: true,
-          });
-        }, 1200);
-      } else {
-        setError(res.error || 'Failed to update password. Please try again.');
-      }
-    }, 400);
+    if (res.success) {
+      setIsSuccess(true);
+      setTimeout(() => {
+        onComplete({
+          ...student,
+          hasChangedPassword: true,
+        });
+      }, 1200);
+    } else {
+      setError(res.error || 'Failed to update password. Please try again.');
+    }
   };
 
   return (

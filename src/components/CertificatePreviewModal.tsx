@@ -1,4 +1,6 @@
 import React from 'react';
+import QRCode from 'react-qr-code';
+import { LOGO_BASE64 } from '../constants';
 import { Award, CheckCircle2, Download, ExternalLink, ShieldCheck, X } from 'lucide-react';
 import { StudentClearanceRecord, StudentProfile } from '../types';
 import { RGUKT_INFO } from '../constants';
@@ -20,8 +22,8 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
 }) => {
   if (!isOpen) return null;
 
-  const handleDownload = () => {
-    generateNoDuesPDF(student, record);
+  const handleDownload = async () => {
+    await generateNoDuesPDF(student, record);
   };
 
   const certNo = record.certificate_hash || `RGUKT-RKV/ND/${new Date().getFullYear()}/${student.id.toUpperCase()}`;
@@ -35,6 +37,7 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
     { id: 'lab' as const, name: 'Laboratories & Workshop' },
     { id: 'finance' as const, name: 'Finance & Accounts' },
     { id: 'sports' as const, name: 'Sports & Physical Ed.' },
+    { id: 'itinfra' as const, name: 'IT Infrastructure' },
   ];
 
   return (
@@ -81,32 +84,39 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
           <div className="bg-white border-2 sm:border-4 border-slate-900 rounded-xl p-4 sm:p-8 shadow-md relative overflow-hidden">
             {/* Inner Gold Border */}
             <div className="border border-amber-500/60 p-4 sm:p-6 rounded-lg space-y-6 relative">
+              
               {/* Seal Watermark Background */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5">
-                <Award className="w-96 h-96 text-slate-900" />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.08]">
+                <img src={LOGO_BASE64} alt="Watermark" className="w-96 h-96 object-contain" />
               </div>
-
+              
               {/* Certificate Top Seal & University Banner */}
-              <div className="text-center space-y-1 border-b border-slate-200 pb-5">
-                <p className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-800">
-                  {RGUKT_INFO.name}
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  {RGUKT_INFO.campus}, {RGUKT_INFO.state} • Established 2008
-                </p>
-                <p className="text-[11px] font-semibold text-slate-700">
-                  OFFICE OF ACADEMIC AFFAIRS & STUDENT WELFARE
-                </p>
-                <div className="pt-2">
+              <div className="flex flex-col items-center border-b border-slate-200 pb-5 space-y-1 relative">
+                <div className="absolute left-0 top-0 hidden sm:block">
+                  <img src={LOGO_BASE64} alt="RGUKT Logo" className="w-16 h-16 object-contain" />
+                </div>
+                <div className="text-center space-y-1 z-10 relative">
+                  <p className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-800">
+                    {RGUKT_INFO.name}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {RGUKT_INFO.campus}, {RGUKT_INFO.state} • Established 2008
+                  </p>
+                  <p className="text-[11px] font-semibold text-slate-700">
+                    OFFICE OF ACADEMIC AFFAIRS & STUDENT WELFARE
+                  </p>
+                </div>
+                <div className="pt-2 z-10">
                   <span className="inline-block px-4 py-1 bg-red-800 text-white font-bold text-xs sm:text-sm tracking-wide rounded-md">
                     CONSOLIDATED NO-DUES & CLEARANCE CERTIFICATE
                   </span>
                 </div>
-                <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-slate-600 pt-2">
+                <div className="flex w-full items-center justify-between text-[11px] font-mono text-slate-600 pt-2 z-10">
                   <span>Cert No: {certNo}</span>
                   <span>Issued: {issueDate}</span>
                 </div>
               </div>
+
 
               {/* Student Particulars Table */}
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 sm:p-4 text-xs grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -130,10 +140,10 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
 
               {/* Clearance Statement */}
               <p className="text-xs text-slate-700 leading-relaxed text-justify">
-                This is to officially certify that <strong>{student.name}</strong> (Student ID: <strong>{student.id.toUpperCase()}</strong>) has fulfilled all institutional responsibilities, settled all monetary and hostel charges, and successfully obtained authenticated digital clearances from all five statutory authorities of RGUKT RK Valley as tabulated below:
+                This is to officially certify that <strong>{student.name}</strong> (Student ID: <strong>{student.id.toUpperCase()}</strong>) has fulfilled all institutional responsibilities, settled all monetary and hostel charges, and successfully obtained authenticated digital clearances from all six statutory authorities of RGUKT RK Valley as tabulated below:
               </p>
 
-              {/* 5 Departments Signatures Table */}
+              {/* 6 Departments Signatures Table */}
               <div className="overflow-x-auto border border-slate-200 rounded-lg">
                 <table className="w-full text-left text-xs border-collapse min-w-[520px]">
                   <thead>
@@ -147,7 +157,7 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-[11px]">
                     {deptList.map((d, i) => {
-                      const cl = record.departments[d.id];
+                      const cl = record?.departments?.[d.id];
                       const sig = cl?.digital_signature;
                       return (
                         <tr key={d.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
@@ -199,10 +209,33 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                 </div>
               </div>
 
-              {/* Bottom Notice */}
-              <div className="text-center text-[10px] text-slate-400 pt-2 border-t border-slate-200">
-                This digital document is electronically generated and digitally signed by RGUKT RK Valley. No physical signature is required.
+              
+              
+              {/* Bottom Notice & QR Code */}
+              <div className="mt-4 pt-4 border-t border-slate-200 flex items-end justify-between">
+                <div className="text-left text-[10px] text-slate-500 max-w-[80%] space-y-1">
+                  <p>
+                    <strong>Authenticity Verification:</strong> This is a digitally generated document. 
+                    The clearance status reflects data recorded by respective department heads on the No-Dues portal.
+                  </p>
+                  <p>
+                    This digital document is electronically generated and digitally signed by RGUKT RK Valley. No physical signature is required.
+                  </p>
+                </div>
+                <div className="flex flex-col items-center justify-center shrink-0 pb-1">
+                  <QRCode 
+                    value={JSON.stringify({
+                      certId: certNo,
+                      studentId: student.id.toUpperCase(),
+                      date: issueDate
+                    })} 
+                    size={60} 
+                    level="L"
+                  />
+                </div>
               </div>
+
+
             </div>
           </div>
         </div>

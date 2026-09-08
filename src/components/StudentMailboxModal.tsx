@@ -35,8 +35,8 @@ export const StudentMailboxModal: React.FC<StudentMailboxModalProps> = ({
   const [filter, setFilter] = useState<'all' | 'approved' | 'denied' | 'certificate_issued'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const loadEmails = () => {
-    const list = getStudentEmails(student.email);
+  const loadEmails = async () => {
+    const list = await getStudentEmails(student.email);
     setEmails(list);
     if (list.length > 0 && !selectedEmail) {
       setSelectedEmail(list[0]);
@@ -78,7 +78,7 @@ export const StudentMailboxModal: React.FC<StudentMailboxModalProps> = ({
     loadEmails();
   };
 
-  const handleDownloadAttachment = (email: EmailNotification) => {
+  const handleDownloadAttachment = async (email: EmailNotification) => {
     if (email.attachments && email.attachments.length > 0 && email.attachments[0].dataUrl) {
       // Direct base64 download
       const link = document.createElement('a');
@@ -89,7 +89,7 @@ export const StudentMailboxModal: React.FC<StudentMailboxModalProps> = ({
       document.body.removeChild(link);
     } else {
       // Fallback generate from record
-      const rec = getClearanceRecord(student.id);
+      const rec = await getClearanceRecord(student.id);
       generateNoDuesPDF(student, rec);
     }
   };

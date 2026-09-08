@@ -11,9 +11,11 @@ import { StudentDashboard } from './views/StudentDashboard';
 import { DepartmentDashboard } from './views/DepartmentDashboard';
 import { HodDashboard } from './views/HodDashboard';
 import { TransactionVerificationDashboard } from './views/TransactionVerificationDashboard';
-import { AlertCircle, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ShieldAlert, Loader2 } from 'lucide-react';
+import { FirebaseDataProvider, useFirebaseData } from './hooks/useFirebaseData';
 
-export default function App() {
+function AppContent() {
+  const { loading, error } = useFirebaseData();
   // Initialize storage seeds
   useEffect(() => {
     initStorage();
@@ -295,6 +297,27 @@ export default function App() {
     );
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center space-y-4 bg-slate-50">
+        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+        <p className="text-slate-500 font-medium text-sm">Synchronizing Secure Data...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 space-y-4 text-center bg-slate-50">
+        <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center">
+          <ShieldAlert className="w-8 h-8 text-rose-600" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">Database Connection Error</h2>
+        <p className="text-slate-500 max-w-md text-sm">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-amber-500 selection:text-white">
       {/* Top Navbar */}
@@ -317,6 +340,14 @@ export default function App() {
         onClose={() => setIsCredentialsModalOpen(false)}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <FirebaseDataProvider>
+      <AppContent />
+    </FirebaseDataProvider>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { AuthSession } from '../types';
+import { useFirebaseData } from '../hooks/useFirebaseData';
 import { getNotifications, markNotificationRead, markAllNotificationsRead } from '../utils/storage';
 import { formatTimestamp } from '../utils/crypto';
 
@@ -29,6 +30,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showNotifications, setShowNotifications] = useState(false);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
 
+
+  const { notifications: allNotifications } = useFirebaseData();
+
   let recipientType: 'student' | 'dept' | 'hod' | undefined;
   let recipientId: string | undefined;
 
@@ -43,20 +47,20 @@ export const Navbar: React.FC<NavbarProps> = ({
     recipientId = session.deptAccount.department;
   }
 
-  const [notifications, setNotifications] = useState(() => getNotifications(recipientType, recipientId));
+  // Use Firebase realtime notifications, fallback to empty array if still loading
+  // and filter dynamically just like getNotifications does.
+  const notifications = React.useMemo(() => {
+    return allNotifications.filter(n => {
+      if (!recipientType) return false;
+      const isRecipientTypeMatch = n.recipient_type === recipientType || n.recipient_type === 'all';
+      const isRecipientIdMatch =
+        !n.recipient_id ||
+        n.recipient_id === 'all' ||
+        (recipientId && n.recipient_id.toLowerCase() === recipientId.toLowerCase());
+      return isRecipientTypeMatch && isRecipientIdMatch;
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 50);
+  }, [allNotifications, recipientType, recipientId]);
 
-  React.useEffect(() => {
-    const update = () => {
-      setNotifications(getNotifications(recipientType, recipientId));
-    };
-    update();
-    window.addEventListener('storage', update);
-    window.addEventListener('rgukt_notification_updated', update);
-    return () => {
-      window.removeEventListener('storage', update);
-      window.removeEventListener('rgukt_notification_updated', update);
-    };
-  }, [recipientType, recipientId]);
 
   // Click outside to close notification dropdown
   React.useEffect(() => {
@@ -76,16 +80,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const handleMarkAllRead = () => {
-    markAllNotificationsRead(recipientType, recipientId);
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    if (recipientType && recipientId) {
+      markAllNotificationsRead(recipientType, recipientId);
+    } else if (recipientType) {
+      markAllNotificationsRead(recipientType, 'all');
+    }
     setShowNotifications(false);
   };
 
   const handleMarkItemRead = (id: string) => {
     markNotificationRead(id);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
   };
 
   return (

@@ -83,20 +83,20 @@ export const ManageStudentsView: React.FC<ManageStudentsViewProps> = ({ onBack }
       return { label: 'Fully Cleared (Cert Issued)', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', type: 'cleared' };
     }
 
-    const depts = ['library', 'hostel', 'lab', 'finance', 'sports'] as const;
-    const statuses = depts.map((d) => rec.departments[d]?.status || 'pending');
+    const depts = ['library', 'hostel', 'lab', 'finance', 'sports', 'itinfra'] as const;
+    const statuses = depts.map((d) => rec?.departments?.[d]?.status || 'pending');
 
     if (statuses.some((s) => s === 'rejected')) {
       return { label: 'Action Needed (Rejected)', color: 'bg-rose-50 text-rose-700 border-rose-200', type: 'rejected' };
     }
 
     const approvedCount = statuses.filter((s) => s === 'approved').length;
-    if (approvedCount === 5) {
-      return { label: 'All 5 Depts Cleared', color: 'bg-blue-50 text-blue-700 border-blue-200', type: 'cleared' };
+    if (approvedCount === 6) {
+      return { label: 'All 6 Depts Cleared', color: 'bg-blue-50 text-blue-700 border-blue-200', type: 'cleared' };
     }
 
     if (approvedCount > 0) {
-      return { label: `${approvedCount}/5 Depts Cleared`, color: 'bg-amber-50 text-amber-700 border-amber-200', type: 'in_progress' };
+      return { label: `${approvedCount}/6 Depts Cleared`, color: 'bg-amber-50 text-amber-700 border-amber-200', type: 'in_progress' };
     }
 
     return { label: 'Pending Clearance', color: 'bg-slate-100 text-slate-600 border-slate-200', type: 'pending' };
@@ -146,11 +146,10 @@ export const ManageStudentsView: React.FC<ManageStudentsViewProps> = ({ onBack }
   }, [students, searchTerm, selectedBranch, selectedLoginStatus, selectedClearanceStatus, clearanceRecords]);
 
   // Re-import / Refresh Master Dataset Handler
-  const handleRefreshMasterDataset = () => {
+  const handleRefreshMasterDataset = async () => {
     setIsImporting(true);
-    setTimeout(() => {
       // Re-run idempotent sync with FULL_REAL_STUDENTS
-      const result = syncStudentRecords(FULL_REAL_STUDENTS);
+      const result = await syncStudentRecords(FULL_REAL_STUDENTS);
       refreshAllData();
       setIsImporting(false);
 
@@ -163,11 +162,11 @@ export const ManageStudentsView: React.FC<ManageStudentsViewProps> = ({ onBack }
         source: 'Official RGUKT Master Dataset (81 Students)',
       });
       setIsImportModalOpen(true);
-    }, 600);
+    
   };
 
   // Custom File / Text Import Handler
-  const handleCustomImport = (text: string) => {
+  const handleCustomImport = async (text: string) => {
     if (!text.trim()) return;
     setIsImporting(true);
 
@@ -197,7 +196,7 @@ export const ManageStudentsView: React.FC<ManageStudentsViewProps> = ({ onBack }
 
       if (parsed.length > 0) {
         const generated = buildStudentProfiles(parsed);
-        const result = syncStudentRecords(generated);
+        const result = await syncStudentRecords(generated);
         refreshAllData();
 
         setImportSummary({
@@ -236,9 +235,9 @@ export const ManageStudentsView: React.FC<ManageStudentsViewProps> = ({ onBack }
   };
 
   // Reset Student Password to default roll number
-  const handleResetPassword = (student: StudentProfile) => {
+  const handleResetPassword = async (student: StudentProfile) => {
     if (confirm(`Reset password for ${student.name} (${student.rollNumber || student.id.toUpperCase()}) to their default roll number?`)) {
-      resetStudentPassword(student.id);
+      await resetStudentPassword(student.id);
       refreshAllData();
       setActionSuccessMessage(`Password for ${student.name} reset to default.`);
       setTimeout(() => setActionSuccessMessage(null), 3000);
@@ -827,12 +826,13 @@ O240635, K. Navyakala, Artificial Intelligence & Machine Learning, 2024-2028"
                     { id: 'lab', name: 'Academic Labs' },
                     { id: 'finance', name: 'Accounts & Finance' },
                     { id: 'sports', name: 'Sports & Games' },
+                    { id: 'itinfra', name: 'IT Infrastructure' },
                   ] as const;
 
                   return (
                     <div className="space-y-1.5">
                       {depts.map((d) => {
-                        const deptStatus = rec?.departments[d.id]?.status || 'pending';
+                        const deptStatus = rec?.departments?.[d.id]?.status || 'pending';
                         return (
                           <div
                             key={d.id}

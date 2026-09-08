@@ -60,15 +60,15 @@ export const ClearanceTracker: React.FC<ClearanceTrackerProps> = ({
             Institutional Department Clearance Status
           </h2>
           <p className="text-xs text-slate-500">
-            Real-time status across 5 statutory clearance authorities at RGUKT RK Valley
+            Real-time status across 6 statutory clearance authorities at RGUKT RK Valley
           </p>
         </div>
-        <span className="text-xs font-semibold text-slate-500">5 Departments</span>
+        <span className="text-xs font-semibold text-slate-500">6 Departments</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {DEPARTMENTS.map((dept: DepartmentMeta) => {
-          const clearance: DepartmentClearance | undefined = clearanceRecord.departments[dept.id];
+          const clearance: DepartmentClearance | undefined = clearanceRecord?.departments?.[dept.id];
           const status = clearance?.status || 'pending';
           const deptDues = dues.filter((d) => d.department === dept.id);
           const unpaidDues = deptDues.filter((d) => d.status === 'Unpaid');
