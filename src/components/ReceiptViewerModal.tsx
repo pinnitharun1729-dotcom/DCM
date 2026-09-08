@@ -213,7 +213,7 @@ export const ReceiptViewerModal: React.FC<ReceiptViewerModalProps> = ({
             Close
           </button>
 
-          {canManage && due.status === 'Receipt Submitted' && (
+          {canManage && due.status === 'Payment Submitted — Awaiting Transaction Verification' && (
             <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto justify-end">
               <button
                 id="btn-reject-receipt-action"

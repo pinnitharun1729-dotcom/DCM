@@ -697,7 +697,7 @@ export function getDues(studentId?: string): CodeDue[] {
   
   // Normalize verification_status for any dues where receipt has been submitted
   const normalized = dues.map((d) => {
-    if (d.status === 'Receipt Submitted' && !d.verification_status) {
+    if (d.status === 'Payment Submitted — Awaiting Transaction Verification' && !d.verification_status) {
       return { ...d, verification_status: 'Pending' as const };
     }
     return d;
@@ -807,7 +807,7 @@ export async function submitDueReceipt(params: {
   // Offload full receipt document to IndexedDB & memory cache to prevent localStorage overflow
   saveReceiptToStorage(params.dueId, params.receiptUrl);
 
-  due.status = 'Receipt Submitted';
+  due.status = 'Payment Submitted — Awaiting Transaction Verification';
   if (params.receiptUrl && params.receiptUrl.length > 20000) {
     due.receipt_url = generateReceiptSvg({
       amount: due.amount,
@@ -871,6 +871,7 @@ export async function approveTransactionVerification(params: {
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
 
+  due.status = 'Payment Verified — Pending Department Clearance';
   due.verification_status = 'Approved';
   due.verification_officer = params.officerName;
   due.verification_timestamp = new Date().toISOString();
@@ -888,6 +889,26 @@ export async function approveTransactionVerification(params: {
     message: `Payment receipt of ₹${due.amount} for ${due.reason} (Ref: ${due.transaction_ref || 'N/A'}) was verified by ${params.officerName}. Ready for departmental clearance review.`,
     type: 'success',
   });
+  // Notify department by email
+  const ACADEMIC_ROLE_ACCOUNTS = (await import('../constants')).ACADEMIC_ROLE_ACCOUNTS;
+  const deptAccount = Object.values(ACADEMIC_ROLE_ACCOUNTS).find(a => a?.department === due.department);
+  if (deptAccount) {
+    const { sendEmailNotification } = await import('./emailService');
+    await sendEmailNotification({
+      to: deptAccount.email,
+      studentId: due.student_id,
+      recipientName: deptAccount.name,
+      from: 'finance@rguktrkv.ac.in',
+      fromName: 'Finance Verification',
+      departmentId: due.department,
+      departmentName: due.department.toUpperCase(),
+      actionType: 'approved',
+      status: 'Approved',
+      subject: `Payment Verified - ${student?.name || due.student_id.toUpperCase()} (${due.department.toUpperCase()})`,
+      body: `A payment receipt of ₹${due.amount} for student ${student?.name || due.student_id.toUpperCase()} has been verified by the Transaction Verification Officer (${params.officerName}). Please review their profile in the No-Dues portal and take final clearance action.`,
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 // Transaction Verification (Finance Officer) denies/rejects transaction reference
@@ -900,6 +921,7 @@ export async function denyTransactionVerification(params: {
   const due = dues.find((d) => d.id === params.dueId);
   if (!due) return;
 
+  due.status = 'Payment Rejected — Please Resubmit';
   due.verification_status = 'Denied';
   due.verification_officer = params.officerName;
   due.verification_timestamp = new Date().toISOString();
@@ -910,12 +932,30 @@ export async function denyTransactionVerification(params: {
   // Notify concerned department admin that payment was not verified
   const student = getStudentById(due.student_id);
   await addNotification({
-    recipient_type: 'dept',
-    recipient_id: due.department,
-    title: `Payment Not Verified: Tx Denied (${student?.name || due.student_id.toUpperCase()})`,
-    message: `Payment receipt of ₹${due.amount} for ${due.department.toUpperCase()} was denied by Finance Officer ${params.officerName}. Reason: ${params.reason}. Due remains unresolved.`,
+    recipient_type: 'student',
+    recipient_id: due.student_id,
+    title: `Payment Rejected — Please Resubmit`,
+    message: `Your payment receipt of ₹${due.amount} for ${due.department.toUpperCase()} was denied. Reason: ${params.reason}. Please upload a valid receipt.`,
     type: 'error',
   });
+  if (student) {
+    const { sendEmailNotification } = await import('./emailService');
+    await sendEmailNotification({
+      to: student.email,
+      studentId: student.id,
+      recipientName: student.name,
+      from: 'finance@rguktrkv.ac.in',
+      fromName: 'Finance Verification',
+      departmentId: due.department,
+      departmentName: due.department.toUpperCase(),
+      actionType: 'denied',
+      status: 'Denied',
+      subject: `Payment Rejected - Action Required (${due.department.toUpperCase()})`,
+      body: `Your payment receipt of ₹${due.amount} for ${due.department.toUpperCase()} has been rejected by the Transaction Verification Officer. Reason: ${params.reason}. Please log in to the portal and resubmit a valid receipt.`,
+      reasonOrRemarks: params.reason,
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 // Department admin verifies and approves receipt (only after Transaction Verification has approved)
@@ -941,7 +981,7 @@ export async function verifyAndApproveReceipt(params: {
   // Check if any other unpaid/receipt-submitted dues remain for this student in this dept
   const studentDues = getDues(due.student_id).filter((d) => d.department === due.department);
   const hasRemainingUnresolved = studentDues.some(
-    (d) => d.status === 'Unpaid' || d.status === 'Receipt Submitted' || d.status === 'Rejected'
+    (d) => d.status === 'Unpaid' || d.status === 'Payment Submitted — Awaiting Transaction Verification' || d.status === 'Rejected'
   );
 
   if (!hasRemainingUnresolved) {
@@ -1317,17 +1357,20 @@ export function getNotifications(
 export async function addNotification(
   notif: Omit<InAppNotification, 'id' | 'timestamp' | 'read'>
 ): Promise<InAppNotification> {
-  const list = getNotifications();
   const newNotif: InAppNotification = {
     ...notif,
     id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toISOString(),
     read: false,
   };
-  list.unshift(newNotif);
-  // Cap in-memory/stored notifications to prevent unbounded growth
-  const trimmed = list.slice(0, 50);
-  safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(trimmed));
+  
+  try {
+    if (db) {
+      await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+    }
+  } catch (err) {
+    console.error("Error adding notification to Firebase:", err);
+  }
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('rgukt_notification_updated', { detail: newNotif }));
@@ -1337,34 +1380,52 @@ export async function addNotification(
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
-  const list = getNotifications();
-  const found = list.find((n) => n.id === id);
-  if (found) {
-    found.read = true;
-    safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(list));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('rgukt_notification_updated'));
+  try {
+    if (db) {
+      await updateDoc(doc(db, 'notifications', id), { read: true });
     }
+  } catch (err) {
+    console.error("Error marking notification read in Firebase:", err);
   }
 }
 
 export async function markAllNotificationsRead(recipientType?: 'student' | 'dept' | 'hod' | 'all', recipientId?: string): Promise<void> {
-  const list = getNotifications();
-  list.forEach((n) => {
-    if (!recipientType) {
-      n.read = true;
-    } else if (n.recipient_type === 'all' || n.recipient_id === 'all') {
-      n.read = true;
-    } else if (
-      n.recipient_type === recipientType &&
-      (!recipientId || n.recipient_id.toLowerCase() === recipientId.toLowerCase())
-    ) {
-      n.read = true;
+  try {
+    if (!db) return;
+    const notificationsSnapshot = await getDocs(collection(db, 'notifications'));
+    
+    // Batch updates would be better here, but doing sequentially/Promise.all for simplicity
+    const updatePromises: Promise<void>[] = [];
+    
+    notificationsSnapshot.docs.forEach(docSnap => {
+      const n = docSnap.data() as InAppNotification;
+      let shouldMark = false;
+      
+      if (!n.read) {
+        if (!recipientType) {
+          shouldMark = true;
+        } else if (n.recipient_type === 'all' || n.recipient_id === 'all') {
+          shouldMark = true;
+        } else if (
+          n.recipient_type === recipientType &&
+          (!recipientId || n.recipient_id.toLowerCase() === recipientId.toLowerCase())
+        ) {
+          shouldMark = true;
+        }
+      }
+      
+      if (shouldMark) {
+        updatePromises.push(updateDoc(docSnap.ref, { read: true }));
+      }
+    });
+    
+    await Promise.all(updatePromises);
+    
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rgukt_notification_updated'));
     }
-  });
-  safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(list));
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('rgukt_notification_updated'));
+  } catch (err) {
+    console.error("Error marking all notifications read in Firebase:", err);
   }
 }
 

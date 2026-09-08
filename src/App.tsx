@@ -13,6 +13,7 @@ import { HodDashboard } from './views/HodDashboard';
 import { TransactionVerificationDashboard } from './views/TransactionVerificationDashboard';
 import { AlertCircle, ShieldAlert, Loader2 } from 'lucide-react';
 import { FirebaseDataProvider, useFirebaseData } from './hooks/useFirebaseData';
+import { handleGoogleRedirectResult } from './utils/authService';
 
 function AppContent() {
   const { loading, error } = useFirebaseData();
@@ -21,7 +22,24 @@ function AppContent() {
     initStorage();
   }, []);
 
+
+
+
   const [session, setCurrentSession] = useState<AuthSession | null>(() => getSession());
+
+  // Handle Google Redirect Result (for Android/Capacitor)
+  useEffect(() => {
+    handleGoogleRedirectResult().then(result => {
+      if (result) {
+        if (result.session) {
+          setCurrentSession(result.session);
+          setSession(result.session);
+        } else if (result.error) {
+          alert('Login Error: ' + result.error);
+        }
+      }
+    });
+  }, []);
   const [currentPath, setCurrentPath] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return window.location.pathname || '/';

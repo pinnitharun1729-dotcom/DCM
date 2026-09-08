@@ -204,12 +204,10 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
   };
 
   // Calculate statistics
-  const allSubmittedReceipts = dues.filter((d) => d.status === 'Receipt Submitted');
-  const actionableReceipts = allSubmittedReceipts.filter((d) => d.verification_status === 'Approved');
-  const pendingTxReceipts = allSubmittedReceipts.filter(
-    (d) => !d.verification_status || d.verification_status === 'Pending'
-  );
-  const deniedTxReceipts = allSubmittedReceipts.filter((d) => d.verification_status === 'Denied');
+  const allSubmittedReceipts = dues.filter((d) => d.status === 'Payment Submitted — Awaiting Transaction Verification' || d.status === 'Payment Verified — Pending Department Clearance' || d.status === 'Payment Rejected — Please Resubmit');
+  const actionableReceipts = allSubmittedReceipts.filter((d) => d.status === 'Payment Verified — Pending Department Clearance');
+  const pendingTxReceipts = allSubmittedReceipts.filter((d) => d.status === 'Payment Submitted — Awaiting Transaction Verification');
+  const deniedTxReceipts = allSubmittedReceipts.filter((d) => d.status === 'Payment Rejected — Please Resubmit');
 
   const clearedStudents = students.filter(
     (s) => clearanceRecords[s.id]?.departments?.[department]?.status === 'approved'
@@ -744,9 +742,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                       const hasUnpaidDues = studentDues.some(
                         (d) =>
                           d.status === 'Unpaid' ||
-                          d.status === 'Receipt Submitted' ||
-                          d.status === 'Rejected' ||
-                          d.verification_status === 'Denied' ||
+                          d.status === 'Payment Verified — Pending Department Clearance' || d.status === 'Payment Submitted — Awaiting Transaction Verification' || d.status === 'Payment Rejected — Please Resubmit' || d.status === 'Rejected' ||
                           d.verification_status === 'Pending'
                       );
 
@@ -832,7 +828,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                                         className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
                                           d.status === 'Approved'
                                             ? 'bg-emerald-100 text-emerald-800'
-                                            : d.status === 'Receipt Submitted'
+                                            : (d.status === 'Payment Verified — Pending Department Clearance' || d.status === 'Payment Submitted — Awaiting Transaction Verification')
                                             ? 'bg-indigo-100 text-indigo-800'
                                             : 'bg-amber-100 text-amber-800'
                                         }`}
@@ -840,7 +836,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                                         {d.status}
                                       </span>
                                     </div>
-                                    {d.status === 'Receipt Submitted' && (
+                                    {(d.status === 'Payment Verified — Pending Department Clearance' || d.status === 'Payment Submitted — Awaiting Transaction Verification') && (
                                       <div className="text-[10px]">
                                         {d.verification_status === 'Approved' ? (
                                           <span className="text-emerald-700 font-semibold flex items-center">

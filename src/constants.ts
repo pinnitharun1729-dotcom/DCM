@@ -370,7 +370,7 @@ export const INITIAL_DUES: CodeDue[] = [
     department: 'lab',
     reason: 'Data Structures Lab: FPGA development kit cable replacement',
     amount: 450,
-    status: 'Receipt Submitted',
+    status: 'Payment Submitted — Awaiting Transaction Verification',
     verification_status: 'Pending',
     receipt_url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80',
     receipt_file_name: 'SBI_Collect_Receipt_DUK88291.pdf',

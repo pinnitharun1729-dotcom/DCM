@@ -72,7 +72,7 @@ export const ClearanceTracker: React.FC<ClearanceTrackerProps> = ({
           const status = clearance?.status || 'pending';
           const deptDues = dues.filter((d) => d.department === dept.id);
           const unpaidDues = deptDues.filter((d) => d.status === 'Unpaid');
-          const submittedReceiptDues = deptDues.filter((d) => d.status === 'Receipt Submitted');
+          const submittedReceiptDues = deptDues.filter((d) => d.status === 'Payment Submitted — Awaiting Transaction Verification');
           const rejectedReceiptDues = deptDues.filter((d) => d.status === 'Rejected');
 
           // Status Badge styling
@@ -195,7 +195,7 @@ export const ClearanceTracker: React.FC<ClearanceTrackerProps> = ({
                         className={`p-3 rounded-xl border text-xs ${
                           due.status === 'Approved'
                             ? 'bg-emerald-50/50 border-emerald-200 text-emerald-900'
-                            : due.status === 'Receipt Submitted'
+                            : due.status === 'Payment Submitted — Awaiting Transaction Verification'
                             ? 'bg-indigo-50/50 border-indigo-200 text-indigo-900'
                             : due.status === 'Rejected'
                             ? 'bg-rose-50/50 border-rose-200 text-rose-900'
@@ -215,14 +215,14 @@ export const ClearanceTracker: React.FC<ClearanceTrackerProps> = ({
                             className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                               due.status === 'Approved'
                                 ? 'bg-emerald-200 text-emerald-800'
-                                : due.status === 'Receipt Submitted'
+                                : due.status === 'Payment Submitted — Awaiting Transaction Verification'
                                 ? 'bg-indigo-200 text-indigo-800'
                                 : due.status === 'Rejected'
                                 ? 'bg-rose-200 text-rose-800'
                                 : 'bg-amber-200 text-amber-900'
                             }`}
                           >
-                            {due.status === 'Receipt Submitted' ? 'Receipt Under Review' : due.status}
+                            {due.status === 'Payment Submitted — Awaiting Transaction Verification' ? 'Receipt Under Review' : due.status}
                           </span>
                         </div>
 
@@ -234,7 +234,7 @@ export const ClearanceTracker: React.FC<ClearanceTrackerProps> = ({
                         )}
 
                         {/* If Receipt Submitted: Show reference number and view button */}
-                        {due.status === 'Receipt Submitted' && (
+                        {due.status === 'Payment Submitted — Awaiting Transaction Verification' && (
                           <div className="mt-2 flex items-center justify-between pt-1 border-t border-indigo-100 text-[11px]">
                             <span className="text-indigo-700 font-mono">
                               Ref: {due.transaction_ref || 'N/A'}

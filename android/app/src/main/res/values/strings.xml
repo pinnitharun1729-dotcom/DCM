@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">RGUKT No-Dues</string>
+    <string name="title_activity_main">RGUKT No-Dues</string>
+    <string name="package_name">com.rgukt.nodues</string>
+    <string name="custom_url_scheme">com.rgukt.nodues</string>
+</resources>

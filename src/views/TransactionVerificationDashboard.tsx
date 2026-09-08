@@ -68,7 +68,7 @@ export const TransactionVerificationDashboard: React.FC<TransactionVerificationD
 
   // Filter dues that have a submitted receipt (or any due that has verification_status)
   const submittedReceiptDues = dues.filter(
-    (d) => d.status === 'Receipt Submitted' || d.verification_status !== undefined
+    (d) => d.status === 'Payment Submitted — Awaiting Transaction Verification' || d.verification_status !== undefined
   );
 
   // Filtered list

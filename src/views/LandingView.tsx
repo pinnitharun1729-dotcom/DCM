@@ -16,7 +16,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { RGUKT_INFO } from '../constants';
-import { getNotifications } from '../utils/storage';
+import { useFirebaseData } from '../hooks/useFirebaseData';
 import { InAppNotification } from '../types';
 
 interface LandingViewProps {
@@ -30,19 +30,12 @@ export const LandingView: React.FC<LandingViewProps> = ({
   onSelectFacultyLogin,
   onOpenCredentials,
 }) => {
-  const [announcements, setAnnouncements] = useState<InAppNotification[]>(() =>
-    getNotifications()
-  );
 
-  useEffect(() => {
-    const update = () => setAnnouncements(getNotifications());
-    window.addEventListener('rgukt_notification_updated', update);
-    window.addEventListener('storage', update);
-    return () => {
-      window.removeEventListener('rgukt_notification_updated', update);
-      window.removeEventListener('storage', update);
-    };
-  }, []);
+  const { notifications } = useFirebaseData();
+  const announcements = React.useMemo(() => {
+    return notifications.filter(n => n.recipient_type === 'all' || n.recipient_id === 'all');
+  }, [notifications]);
+
   return (
     <div className="min-h-[calc(100vh-4rem)] flex flex-col justify-between">
       {/* Hero Section */}

@@ -6,7 +6,7 @@ export type StudentBranchCode = 'CSE' | 'AIML' | 'ECE' | 'EEE' | 'CE' | 'ME' | '
 
 export type ClearanceStatus = 'pending' | 'under_review' | 'approved' | 'rejected';
 
-export type DueStatus = 'Unpaid' | 'Receipt Submitted' | 'Approved' | 'Rejected';
+export type DueStatus = 'Unpaid' | 'Payment Submitted — Awaiting Transaction Verification' | 'Payment Verified — Pending Department Clearance' | 'Payment Rejected — Please Resubmit' | 'Approved' | 'Rejected';
 
 export type VerificationStatus = 'Pending' | 'Approved' | 'Denied';
 

@@ -1,4 +1,5 @@
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getToken } from 'firebase/messaging';
 import { auth, db, googleProvider, messaging, VAPID_KEY } from '../firebaseConfig';
@@ -27,8 +28,17 @@ export async function loginWithGoogle(): Promise<{ session?: AuthSession; error?
       return { error: 'Firebase is not configured. Please add your Firebase configuration variables in the AI Studio Settings (Secrets).' };
     }
     
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
+    
+    let user;
+    if (Capacitor.isNativePlatform()) {
+      // For Capacitor (Android/iOS), use redirect because popup is blocked by WebViews
+      await signInWithRedirect(auth, googleProvider);
+      return {}; // Will reload the app, handle result in getRedirectResult
+    } else {
+      const result = await signInWithPopup(auth, googleProvider);
+      user = result.user;
+    }
+
     const email = user.email?.toLowerCase();
 
     if (!email) {
@@ -233,5 +243,118 @@ export async function loginFacultyWithPassword(email: string, password: string):
       errorMessage = 'Incorrect email or password.';
     }
     return { error: errorMessage };
+  }
+}
+
+export async function handleGoogleRedirectResult(): Promise<{ session?: AuthSession; error?: string } | null> {
+  try {
+    if (!auth) return null;
+    const result = await getRedirectResult(auth);
+    if (!result) return null;
+
+    const user = result.user;
+    const email = user.email?.toLowerCase();
+
+    if (!email) {
+      return { error: 'Failed to retrieve email from Google login.' };
+    }
+
+    const userId = user.uid;
+    // Save FCM token in background
+    saveFcmToken(userId);
+
+    // Check if it's a Faculty/Admin account
+    const isAcademic = ACADEMIC_ROLE_ACCOUNTS[email];
+    if (isAcademic) {
+      let role = 'dept_admin';
+      if (isAcademic.department === 'director' || isAcademic.role === 'director') role = 'director';
+      else if (isAcademic.department === 'hod' || isAcademic.role === 'hod') role = 'hod';
+      else if (isAcademic.department === 'dean' || isAcademic.role === 'dean') role = 'dean';
+
+      return {
+        session: {
+          role: role as any,
+          deptAccount: isAcademic as DeptAccount,
+          activeDepartment: isAcademic.department as any,
+        }
+      };
+    }
+
+    const isStatutory = STATUTORY_DEPT_ACCOUNTS.find(a => a.email.toLowerCase() === email);
+    if (isStatutory) {
+      return {
+        session: {
+          role: 'dept_admin',
+          deptAccount: isStatutory as DeptAccount,
+          activeDepartment: isStatutory.department as any,
+        }
+      };
+    }
+
+    if (email === TRANSACTION_VERIFICATION_ACCOUNT.email.toLowerCase()) {
+      return {
+        session: {
+          role: 'verification_officer',
+          deptAccount: TRANSACTION_VERIFICATION_ACCOUNT as DeptAccount,
+          activeDepartment: 'verification_officer' as any,
+        }
+      };
+    }
+
+    // Otherwise, assume it's a Student
+    if (!email.endsWith('@rguktrkv.ac.in')) {
+      if (auth) await signOut(auth);
+      return { error: 'Access restricted to rguktrkv.ac.in domain only.' };
+    }
+
+    const rollNumber = email.split('@')[0].toUpperCase();
+    const studentId = rollNumber.toLowerCase();
+
+    // Check Firestore for existing student record
+    const studentRef = doc(db, 'students', studentId);
+    const studentSnap = await getDoc(studentRef);
+
+    let studentProfile: StudentProfile;
+
+    if (studentSnap.exists()) {
+      studentProfile = studentSnap.data() as StudentProfile;
+    } else {
+      // Fallback: Check if they are in the hardcoded SEED list or create a generic profile
+      const allSeeds = buildStudentProfiles();
+      const seed = allSeeds.find(s => s.id === studentId);
+      if (seed) {
+        studentProfile = seed;
+      } else {
+        studentProfile = {
+          id: studentId,
+          rollNumber: rollNumber,
+          name: user.displayName || 'Unknown Student',
+          email: email,
+          branch: 'General', // Would need real data mapping
+          branchCode: 'CSE',
+          batch: 'Unknown',
+          studentType: rollNumber.startsWith('R') || rollNumber.startsWith('O') || rollNumber.startsWith('S') ? 'engineering' : 'puc',
+          gender: 'M',
+          photoUrl: user.photoURL || `https://api.dicebear.com/7.x/notionists/svg?seed=\${studentId}`,
+          phone: '',
+          admissionYear: new Date().getFullYear(),
+          passwordHash: '',
+          hasChangedPassword: true,
+        };
+      }
+      // Save to Firestore
+      await setDoc(studentRef, studentProfile);
+    }
+
+    return {
+      session: {
+        role: 'student',
+        student: studentProfile
+      }
+    };
+
+  } catch (error: any) {
+    console.error('Google Redirect Result Error', error);
+    return { error: error.message || 'An error occurred during redirect sign-in.' };
   }
 }

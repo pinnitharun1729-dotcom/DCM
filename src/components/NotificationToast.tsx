@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Bell, CheckCircle2, Info, X } from 'lucide-react';
 import { AuthSession, InAppNotification } from '../types';
-import { getNotifications, markNotificationRead } from '../utils/storage';
+import { markNotificationRead } from '../utils/storage';
+import { useFirebaseData } from '../hooks/useFirebaseData';
 
 interface NotificationToastProps {
   session: AuthSession | null;
@@ -25,35 +26,33 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({ session })
     recipientId = session.deptAccount.department;
   }
 
+
+  const { notifications: allNotifications } = useFirebaseData();
+
   // Listen for realtime notifications
   useEffect(() => {
-    const handleNewNotification = (event: Event) => {
-      const customEvent = event as CustomEvent<InAppNotification | undefined>;
-      const newNotif = customEvent.detail;
-      if (newNotif) {
-        // Check if recipient matches
-        const matches =
-          newNotif.recipient_type === 'all' ||
-          newNotif.recipient_id === 'all' ||
-          (recipientType && newNotif.recipient_type === recipientType && (!recipientId || newNotif.recipient_id.toLowerCase() === recipientId.toLowerCase()));
+    // Filter notifications for this recipient
+    const recipientNotifications = allNotifications.filter(n => {
+      const isRecipientTypeMatch = n.recipient_type === recipientType || n.recipient_type === 'all';
+      const isRecipientIdMatch =
+        !n.recipient_id ||
+        n.recipient_id === 'all' ||
+        (recipientId && n.recipient_id.toLowerCase() === recipientId.toLowerCase());
+      return isRecipientTypeMatch && isRecipientIdMatch;
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-        if (matches && !dismissedIds.has(newNotif.id)) {
-          setActiveToast(newNotif);
-        }
-      } else {
-        // Updated generally, check for recent unread
-        const unread = getNotifications(recipientType, recipientId).filter((n) => !n.read);
-        if (unread.length > 0 && !dismissedIds.has(unread[0].id)) {
-          setActiveToast(unread[0]);
-        }
+    // Find the most recent unread notification that hasn't been dismissed
+    const unread = recipientNotifications.filter(n => !n.read && !dismissedIds.has(n.id));
+
+    if (unread.length > 0) {
+      // Check if this is a newly arrived notification by timestamp (within last 10 seconds)
+      const isRecent = new Date().getTime() - new Date(unread[0].timestamp).getTime() < 10000;
+      if (isRecent && activeToast?.id !== unread[0].id) {
+        setActiveToast(unread[0]);
       }
-    };
+    }
+  }, [allNotifications, recipientType, recipientId, dismissedIds, activeToast?.id]);
 
-    window.addEventListener('rgukt_notification_updated', handleNewNotification);
-    return () => {
-      window.removeEventListener('rgukt_notification_updated', handleNewNotification);
-    };
-  }, [recipientType, recipientId, dismissedIds]);
 
   // Auto-dismiss timer
   useEffect(() => {
